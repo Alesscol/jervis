@@ -16,9 +16,9 @@ app.secret_key = os.urandom(24)
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
-GROQ_API_KEY  = os.environ.get("GROQ_API_KEY",  "QUI_LA_TUA_CHIAVE_GROQ")
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY",  "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")
 TAPO_EMAIL    = os.environ.get("TAPO_EMAIL",     "colettoalessandro0@gmail.com")
-TAPO_PASSWORD = os.environ.get("TAPO_PASSWORD",  "QUI_LA_TUA_PASSWORD_TAPO")
+TAPO_PASSWORD = os.environ.get("TAPO_PASSWORD",  "alessandro10")
 TAPO_DEVICES  = {
     "sedia": "192.168.1.82",  # IP spina sedia
 }
