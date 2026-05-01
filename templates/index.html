@@ -508,9 +508,17 @@
         <h2>⚙ PANNELLO AMMINISTRAZIONE</h2>
 
         <div class="memory-label">CAMBIA LA TUA PASSWORD</div>
-        <div style="display:flex;gap:8px;margin-bottom:16px">
-            <input id="myNewPw" type="password" placeholder="Nuova password" style="flex:1;background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.2);color:#fff;font-family:inherit;font-size:11px;padding:7px 10px;outline:none">
+        <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+            <div style="flex:1;position:relative">
+                <input id="myNewPw" type="password" placeholder="Nuova password" style="width:100%;background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.2);color:#fff;font-family:inherit;font-size:11px;padding:7px 34px 7px 10px;outline:none">
+                <button type="button" onclick="togglePw('myNewPw')" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:rgba(0,229,255,0.5);cursor:pointer;font-size:14px">👁</button>
+            </div>
             <button class="mem-btn" style="flex:0 0 auto;padding:7px 14px" onclick="changeMyPw()">SALVA</button>
+        </div>
+
+        <div class="memory-label">UTENTI ONLINE</div>
+        <div id="presence-list" style="margin-bottom:16px">
+            <div class="memory-item" style="opacity:0.4">Caricamento...</div>
         </div>
 
         <div class="memory-label">UTENTI REGISTRATI</div>
@@ -781,8 +789,28 @@
         // ── ADMIN ──
         async function openAdmin() {
             await loadUsers();
+            await loadPresence();
             document.getElementById('adminPanel').classList.add('open');
             document.getElementById('overlay').classList.add('open');
+        }
+
+        async function loadPresence() {
+            try {
+                const res = await fetch('/admin/presence');
+                const data = await res.json();
+                const el = document.getElementById('presence-list');
+                if (Object.keys(data).length === 0) {
+                    el.innerHTML = '<div class="memory-item" style="opacity:0.4">Nessun accesso registrato.</div>';
+                    return;
+                }
+                el.innerHTML = Object.entries(data).map(([u, v]) => `
+                    <div class="memory-item" style="display:flex;align-items:center;gap:10px">
+                        <span style="width:8px;height:8px;border-radius:50%;background:${v.online ? 'var(--green)' : 'rgba(255,255,255,0.2)'};box-shadow:${v.online ? '0 0 6px var(--green)' : 'none'};flex-shrink:0"></span>
+                        <span style="flex:1">${u}</span>
+                        <span style="font-size:10px;opacity:0.5">${v.online ? 'ONLINE' : v.last_seen}</span>
+                    </div>
+                `).join('');
+            } catch(e) {}
         }
 
         async function loadUsers() {
@@ -856,6 +884,11 @@
             el.style.color = isError ? 'var(--red)' : 'var(--green)';
             el.textContent = (isError ? '⚠ ' : '✓ ') + msg;
             setTimeout(() => el.textContent = '', 3000);
+        }
+
+        function togglePw(id) {
+            const el = document.getElementById(id);
+            el.type = el.type === 'password' ? 'text' : 'password';
         }
 
         // ── ARC REACTOR click easter egg ──

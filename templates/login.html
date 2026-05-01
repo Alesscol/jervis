@@ -25,6 +25,7 @@
             align-items: center;
             justify-content: center;
             overflow: hidden;
+            padding: 20px;
         }
         /* Grid background */
         body::before {
@@ -56,12 +57,13 @@
 
         .login-box {
             position: relative; z-index: 10;
-            width: 400px;
+            width: 420px;
             border: 1px solid rgba(0,229,255,0.25);
             background: rgba(0,10,20,0.92);
             padding: 48px 40px;
             box-shadow: 0 0 60px rgba(0,229,255,0.08), inset 0 0 40px rgba(0,20,40,0.5);
             animation: fadeIn 0.8s ease both;
+            margin: auto;
         }
         @keyframes fadeIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 
@@ -180,7 +182,10 @@
         <input class="field" type="text" id="username" placeholder="username" autocomplete="off">
 
         <div class="field-label">▶ CODICE DI ACCESSO</div>
-        <input class="field" type="password" id="password" placeholder="••••••••">
+        <div style="position:relative">
+            <input class="field" type="password" id="password" placeholder="••••••••" style="padding-right:40px">
+            <button type="button" onclick="togglePw('password')" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:rgba(0,229,255,0.5);cursor:pointer;font-size:16px">👁</button>
+        </div>
 
         <button class="btn-login" onclick="doLogin()">ACCEDI AI SISTEMI</button>
         <div class="error-msg" id="error-msg"></div>
@@ -188,6 +193,11 @@
 
     <script>
         document.addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+
+        function togglePw(id) {
+            const el = document.getElementById(id);
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
 
         async function doLogin() {
             const username = document.getElementById('username').value.trim();
