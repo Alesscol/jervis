@@ -102,7 +102,7 @@ def analizza_immagine(image_b64, media_type, domanda):
                 {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{image_b64}"}},
                 {"type": "text", "text": f"Sei JERVIS. Rispondi in italiano, breve e preciso. {domanda}"}
             ]}],
-            max_tokens=500,
+            max_tokens=2000,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -373,7 +373,7 @@ def chat():
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
-                max_tokens=300,
+                max_tokens=2000,
                 temperature=0.7,
             )
             answer = response.choices[0].message.content.strip()
