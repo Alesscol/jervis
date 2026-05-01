@@ -478,6 +478,7 @@
                 <button class="btn-voice" id="uploadBtn" title="Carica immagine" onclick="document.getElementById('fileInput').click()">📎</button>
                 <input type="file" id="fileInput" accept="image/*" style="display:none">
                 <button class="btn-voice" id="voiceBtn" title="Microfono">🎙</button>
+                <button class="btn-voice" id="stopBtn" title="Ferma voce" onclick="stopVoice()">⏹</button>
                 <button class="btn-send" onclick="sendManual()">ESEGUI</button>
             </div>
             <div class="input-meta">
@@ -881,7 +882,13 @@
             document.getElementById('myNewPw').value = '';
             showAdminMsg(data.ok ? 'Password aggiornata!' : data.error, !data.ok);
         }
-
+        function stopVoice() {
+    if (window.currentAudio) {
+        window.currentAudio.pause();
+        window.currentAudio.currentTime = 0;
+        window.currentAudio = null;
+    }
+}
         function showAdminMsg(msg, isError) {
             const el = document.getElementById('admin-msg');
             el.style.color = isError ? 'var(--red)' : 'var(--green)';
