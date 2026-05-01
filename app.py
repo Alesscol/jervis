@@ -46,9 +46,18 @@ def save_json(filename, data):
 #  GESTIONE UTENTI
 # ══════════════════════════════════════════════════════════════════
 def load_users():
-    default_users = {"admin": {"password": hash_pw("Jervis2026"), "role": "admin"}}
-    return load_json(USERS_FILE, default_users)
-
+    # Questi utenti non verranno MAI cancellati perché sono scritti nel codice
+    vip_users = {
+        "admin": {"password": hash_pw("alessandro10"), "role": "admin"},
+        "luca": {"password": hash_pw("PumbaLaRue010"), "role": "user"},
+        "cristian":  {"password": hash_pw("prova"), "role": "user"}
+    }
+    
+    # Carica anche eventuali utenti aggiunti dal sito (finché Render non resetta)
+    creati_dal_sito = load_json(USERS_FILE, {})
+    
+    # Unisce le due liste (i VIP vincono sempre)
+    return {**creati_dal_sito, **vip_users}
 def save_users(users):
     save_json(USERS_FILE, users)
 
