@@ -16,17 +16,17 @@ app.secret_key = "jervis-super-secret-2026"
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
-GROQ_API_KEY  = os.environ.get("GROQ_API_KEY",  "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")
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "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")
 groq_client   = Groq(api_key=GROQ_API_KEY)
 
-# ── FILE UTENTI ───────────────────────────────────────────────────
-USERS_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
-MEMORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jervis_memory.json")
+# ── FILE ──────────────────────────────────────────────────────────
+USERS_FILE    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
+MEMORY_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jervis_memory.json")
 PRESENCE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presence.json")
 
-# Sessioni attive in memoria {username: last_seen_timestamp}
 active_sessions = {}
 
+# ── PRESENZA ──────────────────────────────────────────────────────
 def load_presence():
     if os.path.exists(PRESENCE_FILE):
         try:
@@ -50,6 +50,7 @@ def update_presence(username):
     presence[username] = {"last_seen": now}
     save_presence(presence)
 
+# ── UTENTI ────────────────────────────────────────────────────────
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
@@ -60,10 +61,7 @@ def load_users():
                 return json.load(f)
         except Exception:
             pass
-    # Crea utenti di default
-    default = {
-        "admin": {"password": hash_pw("Jervis2026"), "role": "admin"}
-    }
+    default = {"admin": {"password": hash_pw("Jervis2026"), "role": "admin"}}
     save_users(default)
     return default
 
@@ -210,8 +208,8 @@ def login():
     user = users.get(username)
     if user and user["password"] == hash_pw(password):
         session["username"] = username
-        update_presence(username)
         session["role"] = user["role"]
+        update_presence(username)
         return jsonify({"ok": True, "role": user["role"]})
     return jsonify({"ok": False, "error": "Username o password errati"}), 401
 
@@ -227,14 +225,13 @@ def me():
     return jsonify({"error": "Non loggato"}), 401
 
 # ══════════════════════════════════════════════════════════════════
-#  ROUTE ADMIN — GESTIONE UTENTI
+#  ROUTE ADMIN
 # ══════════════════════════════════════════════════════════════════
 @app.route('/admin/users', methods=['GET'])
 @require_login
 @require_admin
 def get_users():
     users = load_users()
-    # Non mandare le password hash
     return jsonify({u: {"role": v["role"]} for u, v in users.items()})
 
 @app.route('/admin/users', methods=['POST'])
@@ -294,6 +291,33 @@ def change_my_password():
     save_users(users)
     return jsonify({"ok": True})
 
+@app.route('/admin/presence', methods=['GET'])
+@require_login
+@require_admin
+def get_presence():
+    presence = load_presence()
+    now = datetime.datetime.now()
+    result = {}
+    for user, data in presence.items():
+        last_seen_str = data.get("last_seen", "")
+        try:
+            last_seen = datetime.datetime.fromisoformat(last_seen_str)
+            diff = (now - last_seen).total_seconds()
+            online = diff < 300
+            if diff < 60:
+                ago = "adesso"
+            elif diff < 3600:
+                ago = f"{int(diff/60)} min fa"
+            elif diff < 86400:
+                ago = f"{int(diff/3600)}h fa"
+            else:
+                ago = last_seen.strftime("%d/%m %H:%M")
+        except:
+            online = False
+            ago = "mai"
+        result[user] = {"online": online, "last_seen": ago}
+    return jsonify(result)
+
 # ══════════════════════════════════════════════════════════════════
 #  ROUTE CHAT
 # ══════════════════════════════════════════════════════════════════
@@ -307,21 +331,25 @@ def chat():
         image_b64 = data.get('image_b64', None)
         image_type = data.get('image_type', 'image/jpeg')
         username = session.get("username", "Signore")
-        if username != "Signore": update_presence(username)
+        if username != "Signore":
+            update_presence(username)
 
         if not user_input and not image_b64:
             return jsonify({'response': "Non ho rilevato alcun comando."})
 
         memory = load_memory()
 
+        # Immagine caricata dall'utente
         if image_b64:
             domanda = user_input if user_input else "Descrivi questa immagine in dettaglio."
             answer = analizza_immagine(image_b64, image_type, domanda)
             extract_facts(user_input or "[immagine]", answer, memory)
             return jsonify({'response': answer})
 
+        # Generazione immagine
         gen_kw = ["genera un'immagine", "crea un'immagine", "disegna", "genera una foto",
-                  "crea una foto", "fai un'immagine", "crea un disegno", "genera un"]
+                  "genera la foto", "crea una foto", "fai un'immagine", "crea un disegno",
+                  "genera un", "crea un", "fammi vedere", "mostrami"]
         if any(k in user_input.lower() for k in gen_kw):
             prompt = user_input
             for k in sorted(gen_kw, key=len, reverse=True):
@@ -331,6 +359,7 @@ def chat():
             extract_facts(user_input, answer, memory)
             return jsonify({'response': answer, 'image_url': img_url})
 
+        # Chat normale
         messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
         for turn in session_history[-10:]:
             messages.append({"role": "user", "content": turn['user']})
@@ -346,18 +375,21 @@ def chat():
             )
             answer = response.choices[0].message.content.strip()
         except Exception as e:
+            print(f"Errore Groq: {e}")
             answer = "Sistemi temporaneamente irraggiungibili, Signore."
 
         extract_facts(user_input, answer, memory)
 
-        audio_text = answer.replace("JERVIS","Giervis").replace("Jervis","Giervis")
+        audio_text = answer.replace("JERVIS", "Giervis").replace("Jervis", "Giervis")
         static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
         os.makedirs(static_dir, exist_ok=True)
         for f in os.listdir(static_dir):
             if f.startswith("voice_"):
-                try: os.remove(os.path.join(static_dir, f))
-                except: pass
-        filename = f"voice_{random.randint(10000,99999)}.mp3"
+                try:
+                    os.remove(os.path.join(static_dir, f))
+                except:
+                    pass
+        filename = f"voice_{random.randint(10000, 99999)}.mp3"
         run_async(generate_voice(audio_text, os.path.join(static_dir, filename)))
 
         return jsonify({'response': answer, 'audio_url': f'/static/{filename}'})
@@ -366,47 +398,21 @@ def chat():
         print(f"ERRORE: {e}")
         return jsonify({'response': "Errore critico nei sistemi."})
 
+# ── MEMORIA ───────────────────────────────────────────────────────
 @app.route('/memory', methods=['GET'])
 @require_login
 def get_memory():
     memory = load_memory()
-    return jsonify({'user_name': memory.get('user_name','Signore'),
-                    'facts': memory.get('facts',[]),
-                    'total_conversations': len(memory.get('conversations',[]))})
+    return jsonify({'user_name': memory.get('user_name', 'Signore'),
+                    'facts': memory.get('facts', []),
+                    'total_conversations': len(memory.get('conversations', []))})
 
 @app.route('/memory/clear', methods=['POST'])
 @require_login
 def clear_memory():
-    save_memory({"facts":[],"conversations":[],"user_name":"Signore"})
-    return jsonify({'status':'ok'})
+    save_memory({"facts": [], "conversations": [], "user_name": "Signore"})
+    return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host='0.0.0.0', port=port)
-
-@app.route('/admin/presence', methods=['GET'])
-@require_login
-@require_admin
-def get_presence():
-    presence = load_presence()
-    now = datetime.datetime.now()
-    result = {}
-    for user, data in presence.items():
-        last_seen_str = data.get("last_seen", "")
-        try:
-            last_seen = datetime.datetime.fromisoformat(last_seen_str)
-            diff = (now - last_seen).total_seconds()
-            online = diff < 300  # online se visto negli ultimi 5 minuti
-            if diff < 60:
-                ago = "adesso"
-            elif diff < 3600:
-                ago = f"{int(diff/60)} min fa"
-            elif diff < 86400:
-                ago = f"{int(diff/3600)}h fa"
-            else:
-                ago = last_seen.strftime("%d/%m %H:%M")
-        except:
-            online = False
-            ago = "mai"
-        result[user] = {"online": online, "last_seen": ago}
-    return jsonify(result)
