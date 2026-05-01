@@ -51,7 +51,7 @@ def load_users():
         "admin": {"password": hash_pw("alessandro10"), "role": "admin"},
         "luca": {"password": hash_pw("PumbaLaRue010"), "role": "user"},
         "giacomo": {"password": hash_pw("Naxx7!"), "role": "user"},
-        "cristian":  {"password": hash_pw("prova"), "role": "user"}\
+        "cristian":  {"password": hash_pw("Kvaratskhelia"), "role": "user"}\
     }
     
     # Carica anche eventuali utenti aggiunti dal sito (finché Render non resetta)
