@@ -8,7 +8,6 @@ import hashlib
 from flask import Flask, render_template, request, jsonify, session
 import edge_tts
 from groq import Groq
-from pymongo import MongoClient
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
@@ -17,110 +16,63 @@ app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "QUI_LA_TUA_CHIAVE_GROQ")
-groq_client  = Groq(api_key=GROQ_API_KEY)
+groq_client = Groq(api_key=GROQ_API_KEY)
 
-# ── MONGODB ───────────────────────────────────────────────────────
-MONGO_URI = os.environ.get("MONGO_URI", "")  # inserisci su Render come variabile env
-
-_mongo_client = None
-_db = None
-
-def get_db():
-    global _mongo_client, _db
-    if _db is None:
-        _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        _db = _mongo_client["jervisdb"]
-    return _db
-
-# Sessioni attive in memoria {username: last_seen_timestamp}
-active_sessions = {}
+# File locali per i dati (Sostituiscono MongoDB)
+USERS_FILE = 'users.json'
+MEMORY_FILE = 'memory.json'
+PRESENCE_FILE = 'presence.json'
 
 # ══════════════════════════════════════════════════════════════════
-#  UTENTI
+#  FUNZIONI DI SUPPORTO LOCALI
 # ══════════════════════════════════════════════════════════════════
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-def load_users():
-    try:
-        db = get_db()
-        docs = list(db.users.find({}, {"_id": 0}))
-        if docs:
-            return {d["username"]: {"password": d["password"], "role": d["role"]} for d in docs}
-    except Exception as e:
-        print(f"[MongoDB] load_users error: {e}")
-
-    # Primo avvio: crea admin di default
-    default = {"admin": {"password": hash_pw("Jervis2026"), "role": "admin"}}
-    save_users(default)
+def load_json(filename, default):
+    if os.path.exists(filename):
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return default
     return default
 
-def save_users(users):
-    try:
-        db = get_db()
-        for username, data in users.items():
-            db.users.update_one(
-                {"username": username},
-                {"$set": {"username": username, "password": data["password"], "role": data["role"]}},
-                upsert=True
-            )
-    except Exception as e:
-        print(f"[MongoDB] save_users error: {e}")
-
-def delete_user_db(username):
-    try:
-        db = get_db()
-        db.users.delete_one({"username": username})
-    except Exception as e:
-        print(f"[MongoDB] delete_user error: {e}")
+def save_json(filename, data):
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4)
 
 # ══════════════════════════════════════════════════════════════════
-#  PRESENZA
+#  GESTIONE UTENTI
+# ══════════════════════════════════════════════════════════════════
+def load_users():
+    default_users = {"admin": {"password": hash_pw("Jervis2026"), "role": "admin"}}
+    return load_json(USERS_FILE, default_users)
+
+def save_users(users):
+    save_json(USERS_FILE, users)
+
+# ══════════════════════════════════════════════════════════════════
+#  GESTIONE PRESENZA
 # ══════════════════════════════════════════════════════════════════
 def update_presence(username):
+    presence = load_json(PRESENCE_FILE, {})
     now = datetime.datetime.now().isoformat()
-    active_sessions[username] = now
-    try:
-        db = get_db()
-        db.presence.update_one(
-            {"username": username},
-            {"$set": {"username": username, "last_seen": now}},
-            upsert=True
-        )
-    except Exception as e:
-        print(f"[MongoDB] update_presence error: {e}")
+    presence[username] = {"last_seen": now}
+    save_json(PRESENCE_FILE, presence)
 
 def load_presence():
-    try:
-        db = get_db()
-        docs = list(db.presence.find({}, {"_id": 0}))
-        return {d["username"]: {"last_seen": d.get("last_seen", "")} for d in docs}
-    except Exception as e:
-        print(f"[MongoDB] load_presence error: {e}")
-        return {}
+    return load_json(PRESENCE_FILE, {})
 
 # ══════════════════════════════════════════════════════════════════
-#  MEMORIA
+#  GESTIONE MEMORIA
 # ══════════════════════════════════════════════════════════════════
 def load_memory():
-    try:
-        db = get_db()
-        doc = db.memory.find_one({"_id": "jervis_memory"})
-        if doc:
-            doc.pop("_id", None)
-            return doc
-    except Exception as e:
-        print(f"[MongoDB] load_memory error: {e}")
-    return {"facts": [], "conversations": [], "user_name": "Signore"}
+    default_memory = {"facts": [], "conversations": [], "user_name": "Signore"}
+    return load_json(MEMORY_FILE, default_memory)
 
 def save_memory(memory):
-    try:
-        db = get_db()
-        data = dict(memory)
-        data["_id"] = "jervis_memory"
-        db.memory.replace_one({"_id": "jervis_memory"}, data, upsert=True)
-    except Exception as e:
-        print(f"[MongoDB] save_memory error: {e}")
+    save_json(MEMORY_FILE, memory)
 
 # ══════════════════════════════════════════════════════════════════
 #  DECORATORI AUTH
@@ -154,7 +106,7 @@ def genera_immagine(prompt):
 def analizza_immagine(image_b64, media_type, domanda):
     try:
         response = groq_client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            model="llama-3.2-11b-vision-preview",
             messages=[{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{image_b64}"}},
                 {"type": "text", "text": f"Sei JERVIS. Rispondi in italiano, breve e preciso. {domanda}"}
@@ -201,24 +153,13 @@ REGOLE:
 - Chiama l'utente "{name}"
 - Rispondi SEMPRE in italiano
 - Risposte brevi e precise (max 2-3 frasi)
-- Sei JERVIS, non un'AI generica
-
-CAPACITÀ:
-- Generazione immagini su richiesta
-- Analisi foto e file caricati
-- Memoria delle conversazioni passate
-
-COSA SAI DELL'UTENTE:
-{facts_text}
 
 CONVERSAZIONI RECENTI:
 {recent_text}
-
-Oggi è {datetime.datetime.now().strftime('%A %d %B %Y, ore %H:%M')}.
 """
 
 # ══════════════════════════════════════════════════════════════════
-#  TTS
+#  TTS (VOCE)
 # ══════════════════════════════════════════════════════════════════
 async def generate_voice(text, filepath):
     try:
@@ -236,7 +177,7 @@ def run_async(coro):
         loop.close()
 
 # ══════════════════════════════════════════════════════════════════
-#  ROUTE AUTH
+#  ROUTES
 # ══════════════════════════════════════════════════════════════════
 @app.route('/')
 def index():
@@ -263,15 +204,6 @@ def logout():
     session.clear()
     return jsonify({"ok": True})
 
-@app.route('/me')
-def me():
-    if session.get("username"):
-        return jsonify({"username": session["username"], "role": session["role"]})
-    return jsonify({"error": "Non loggato"}), 401
-
-# ══════════════════════════════════════════════════════════════════
-#  ROUTE ADMIN — GESTIONE UTENTI
-# ══════════════════════════════════════════════════════════════════
 @app.route('/admin/users', methods=['GET'])
 @require_login
 @require_admin
@@ -287,170 +219,60 @@ def add_user():
     username = data.get("username", "").strip()
     password = data.get("password", "").strip()
     role = data.get("role", "user")
-    if not username or not password:
-        return jsonify({"error": "Username e password obbligatori"}), 400
     users = load_users()
     if username in users:
-        return jsonify({"error": "Utente già esistente"}), 400
+        return jsonify({"error": "Utente esistente"}), 400
     users[username] = {"password": hash_pw(password), "role": role}
     save_users(users)
     return jsonify({"ok": True})
 
-@app.route('/admin/users/<username>', methods=['DELETE'])
-@require_login
-@require_admin
-def delete_user(username):
-    if username == session["username"]:
-        return jsonify({"error": "Non puoi eliminare te stesso"}), 400
-    users = load_users()
-    if username not in users:
-        return jsonify({"error": "Utente non trovato"}), 404
-    delete_user_db(username)
-    return jsonify({"ok": True})
-
-@app.route('/admin/users/<username>/password', methods=['PUT'])
-@require_login
-@require_admin
-def change_password(username):
-    data = request.get_json()
-    new_pw = data.get("password", "").strip()
-    if not new_pw:
-        return jsonify({"error": "Password obbligatoria"}), 400
-    users = load_users()
-    if username not in users:
-        return jsonify({"error": "Utente non trovato"}), 404
-    users[username]["password"] = hash_pw(new_pw)
-    save_users({username: users[username]})
-    return jsonify({"ok": True})
-
-@app.route('/admin/my-password', methods=['PUT'])
-@require_login
-def change_my_password():
-    data = request.get_json()
-    new_pw = data.get("password", "").strip()
-    if not new_pw:
-        return jsonify({"error": "Password obbligatoria"}), 400
-    users = load_users()
-    users[session["username"]]["password"] = hash_pw(new_pw)
-    save_users({session["username"]: users[session["username"]]})
-    return jsonify({"ok": True})
-
-@app.route('/admin/presence', methods=['GET'])
-@require_login
-@require_admin
-def get_presence():
-    presence = load_presence()
-    now = datetime.datetime.now()
-    result = {}
-    for user, data in presence.items():
-        last_seen_str = data.get("last_seen", "")
-        try:
-            last_seen = datetime.datetime.fromisoformat(last_seen_str)
-            diff = (now - last_seen).total_seconds()
-            online = diff < 300
-            if diff < 60:
-                ago = "adesso"
-            elif diff < 3600:
-                ago = f"{int(diff/60)} min fa"
-            elif diff < 86400:
-                ago = f"{int(diff/3600)}h fa"
-            else:
-                ago = last_seen.strftime("%d/%m %H:%M")
-        except:
-            online = False
-            ago = "mai"
-        result[user] = {"online": online, "last_seen": ago}
-    return jsonify(result)
-
-# ══════════════════════════════════════════════════════════════════
-#  ROUTE CHAT
-# ══════════════════════════════════════════════════════════════════
 @app.route('/chat', methods=['POST'])
 @require_login
 def chat():
-    try:
-        data = request.get_json()
-        user_input    = data.get('msg', '').strip()
-        session_history = data.get('history', [])
-        image_b64     = data.get('image_b64', None)
-        image_type    = data.get('image_type', 'image/jpeg')
-        username      = session.get("username", "Signore")
-        if username != "Signore":
-            update_presence(username)
+    data = request.get_json()
+    user_input = data.get('msg', '').strip()
+    image_b64 = data.get('image_b64', None)
+    image_type = data.get('image_type', 'image/jpeg')
+    username = session.get("username", "Signore")
+    update_presence(username)
 
-        if not user_input and not image_b64:
-            return jsonify({'response': "Non ho rilevato alcun comando."})
-
-        memory = load_memory()
-
-        if image_b64:
-            domanda = user_input if user_input else "Descrivi questa immagine in dettaglio."
-            answer = analizza_immagine(image_b64, image_type, domanda)
-            extract_facts(user_input or "[immagine]", answer, memory)
-            return jsonify({'response': answer})
-
-        gen_kw = ["genera un'immagine", "crea un'immagine", "disegna", "genera una foto",
-                  "crea una foto", "fai un'immagine", "crea un disegno", "genera un"]
-        if any(k in user_input.lower() for k in gen_kw):
-            prompt = user_input
-            for k in sorted(gen_kw, key=len, reverse=True):
-                prompt = prompt.lower().replace(k, "").strip()
-            img_url = genera_immagine(prompt or user_input)
-            answer = "Ecco l'immagine generata, Signore."
-            extract_facts(user_input, answer, memory)
-            return jsonify({'response': answer, 'image_url': img_url})
-
-        messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
-        for turn in session_history[-10:]:
-            messages.append({"role": "user",      "content": turn['user']})
-            messages.append({"role": "assistant",  "content": turn['jervis']})
-        messages.append({"role": "user", "content": user_input})
-
-        try:
-            response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                max_tokens=300,
-                temperature=0.7,
-            )
-            answer = response.choices[0].message.content.strip()
-        except Exception as e:
-            answer = "Sistemi temporaneamente irraggiungibili, Signore."
-
-        extract_facts(user_input, answer, memory)
-
-        audio_text = answer.replace("JERVIS", "Giervis").replace("Jervis", "Giervis")
-        static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-        os.makedirs(static_dir, exist_ok=True)
-        for f in os.listdir(static_dir):
-            if f.startswith("voice_"):
-                try: os.remove(os.path.join(static_dir, f))
-                except: pass
-        filename = f"voice_{random.randint(10000,99999)}.mp3"
-        run_async(generate_voice(audio_text, os.path.join(static_dir, filename)))
-
-        return jsonify({'response': answer, 'audio_url': f'/static/{filename}'})
-
-    except Exception as e:
-        print(f"ERRORE: {e}")
-        return jsonify({'response': "Errore critico nei sistemi."})
-
-@app.route('/memory', methods=['GET'])
-@require_login
-def get_memory():
     memory = load_memory()
-    return jsonify({
-        'user_name': memory.get('user_name', 'Signore'),
-        'facts': memory.get('facts', []),
-        'total_conversations': len(memory.get('conversations', []))
-    })
 
-@app.route('/memory/clear', methods=['POST'])
-@require_login
-def clear_memory():
-    save_memory({"facts": [], "conversations": [], "user_name": "Signore"})
-    return jsonify({'status': 'ok'})
+    if image_b64:
+        domanda = user_input if user_input else "Cosa vedi?"
+        answer = analizza_immagine(image_b64, image_type, domanda)
+        extract_facts("[immagine]", answer, memory)
+        return jsonify({'response': answer})
+
+    # Logica immagini
+    if any(k in user_input.lower() for k in ["genera", "disegna", "crea immagine"]):
+        img_url = genera_immagine(user_input)
+        return jsonify({'response': "Certamente, Signore.", 'image_url': img_url})
+
+    # Logica Testo Groq
+    messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
+    messages.append({"role": "user", "content": user_input})
+    
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            max_tokens=300
+        )
+        answer = response.choices[0].message.content.strip()
+    except:
+        answer = "Sistemi offline, Signore."
+
+    extract_facts(user_input, answer, memory)
+
+    # Genera Voce
+    static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    os.makedirs(static_dir, exist_ok=True)
+    filename = f"voice_{random.randint(1000,9999)}.mp3"
+    run_async(generate_voice(answer, os.path.join(static_dir, filename)))
+
+    return jsonify({'response': answer, 'audio_url': f'/static/{filename}'})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(debug=False, host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port)
