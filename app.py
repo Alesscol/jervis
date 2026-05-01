@@ -347,9 +347,10 @@ def chat():
             return jsonify({'response': answer})
 
         # Generazione immagine
-        gen_kw = ["genera un'immagine", "crea un'immagine", "disegna", "genera una foto",
-          "genera la foto", "crea una foto", "fai un'immagine", "crea un disegno",
-          "genera un", "crea un", "fammi vedere", "mostrami", 
+        gen_kw = gen_kw = ["genera un'immagine", "genera l'immagine", "crea un'immagine", "crea l'immagine",
+          "disegna", "genera una foto", "genera la foto", "crea una foto", 
+          "fai un'immagine", "fai l'immagine", "crea un disegno",
+          "genera un", "crea un", "fammi vedere", "mostrami",
           "mi faresti", "mi fai", "puoi farmi", "fammi", "voglio vedere",
           "un'immagine di", "una foto di", "un disegno di"]
         if any(k in user_input.lower() for k in gen_kw):
