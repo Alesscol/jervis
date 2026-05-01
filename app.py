@@ -22,6 +22,33 @@ groq_client   = Groq(api_key=GROQ_API_KEY)
 # ── FILE UTENTI ───────────────────────────────────────────────────
 USERS_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
 MEMORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jervis_memory.json")
+PRESENCE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presence.json")
+
+# Sessioni attive in memoria {username: last_seen_timestamp}
+active_sessions = {}
+
+def load_presence():
+    if os.path.exists(PRESENCE_FILE):
+        try:
+            with open(PRESENCE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_presence(presence):
+    try:
+        with open(PRESENCE_FILE, "w", encoding="utf-8") as f:
+            json.dump(presence, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def update_presence(username):
+    now = datetime.datetime.now().isoformat()
+    active_sessions[username] = now
+    presence = load_presence()
+    presence[username] = {"last_seen": now}
+    save_presence(presence)
 
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
@@ -183,6 +210,7 @@ def login():
     user = users.get(username)
     if user and user["password"] == hash_pw(password):
         session["username"] = username
+        update_presence(username)
         session["role"] = user["role"]
         return jsonify({"ok": True, "role": user["role"]})
     return jsonify({"ok": False, "error": "Username o password errati"}), 401
@@ -279,6 +307,7 @@ def chat():
         image_b64 = data.get('image_b64', None)
         image_type = data.get('image_type', 'image/jpeg')
         username = session.get("username", "Signore")
+        if username != "Signore": update_presence(username)
 
         if not user_input and not image_b64:
             return jsonify({'response': "Non ho rilevato alcun comando."})
@@ -354,3 +383,30 @@ def clear_memory():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host='0.0.0.0', port=port)
+
+@app.route('/admin/presence', methods=['GET'])
+@require_login
+@require_admin
+def get_presence():
+    presence = load_presence()
+    now = datetime.datetime.now()
+    result = {}
+    for user, data in presence.items():
+        last_seen_str = data.get("last_seen", "")
+        try:
+            last_seen = datetime.datetime.fromisoformat(last_seen_str)
+            diff = (now - last_seen).total_seconds()
+            online = diff < 300  # online se visto negli ultimi 5 minuti
+            if diff < 60:
+                ago = "adesso"
+            elif diff < 3600:
+                ago = f"{int(diff/60)} min fa"
+            elif diff < 86400:
+                ago = f"{int(diff/3600)}h fa"
+            else:
+                ago = last_seen.strftime("%d/%m %H:%M")
+        except:
+            online = False
+            ago = "mai"
+        result[user] = {"online": online, "last_seen": ago}
+    return jsonify(result)
