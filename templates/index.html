@@ -673,10 +673,13 @@
                 if (conversationHistory.length > 20) conversationHistory.shift();
 
                 if (data.audio_url) {
-                    const audio = new Audio(data.audio_url);
-                    audio.play().catch(() => {});
-                }
-
+    if (window.currentAudio) {
+        window.currentAudio.pause();
+        window.currentAudio = null;
+    }
+    window.currentAudio = new Audio(data.audio_url);
+    window.currentAudio.play().catch(() => {});
+}
                 if (data.tapo) {
                     console.log('[TAPO]', data.tapo);
                 }
