@@ -446,6 +446,8 @@
             </div>
             <div class="header-right">
                 <button class="memory-btn" onclick="openMemory()">⬡ MEMORIA</button>
+                <button class="memory-btn" id="adminBtn" onclick="openAdmin()" style="display:none">⚙ ADMIN</button>
+                <button class="memory-btn" onclick="doLogout()">⏻ ESCI</button>
                 <div class="status-panel">
                     <div class="status-online"><span class="status-dot"></span><span class="status-label">ONLINE</span></div>
                     <div class="status-sub">SISTEMA OPERATIVO ATTIVO</div>
@@ -486,7 +488,7 @@
     </div>
 
     <!-- MEMORY PANEL -->
-    <div class="overlay" id="overlay" onclick="closeMemory()"></div>
+    <div class="overlay" id="overlay" onclick="closeAll()"></div>
     <div class="memory-panel" id="memoryPanel">
         <h2>⬡ ARCHIVIO MEMORIA</h2>
         <div class="memory-label">UTENTE IDENTIFICATO</div>
@@ -496,8 +498,38 @@
         <div class="memory-label">CONVERSAZIONI ARCHIVIATE</div>
         <div class="memory-item" id="mem-count">—</div>
         <div class="memory-actions">
-            <button class="mem-btn" onclick="closeMemory()">CHIUDI</button>
+            <button class="mem-btn" onclick="closeAll()">CHIUDI</button>
             <button class="mem-btn danger" onclick="clearMemory()">CANCELLA MEMORIA</button>
+        </div>
+    </div>
+
+    <!-- ADMIN PANEL -->
+    <div class="memory-panel" id="adminPanel" style="min-width:460px;max-width:560px">
+        <h2>⚙ PANNELLO AMMINISTRAZIONE</h2>
+
+        <div class="memory-label">CAMBIA LA TUA PASSWORD</div>
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+            <input id="myNewPw" type="password" placeholder="Nuova password" style="flex:1;background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.2);color:#fff;font-family:inherit;font-size:11px;padding:7px 10px;outline:none">
+            <button class="mem-btn" style="flex:0 0 auto;padding:7px 14px" onclick="changeMyPw()">SALVA</button>
+        </div>
+
+        <div class="memory-label">UTENTI REGISTRATI</div>
+        <div id="users-list" style="margin-bottom:16px"></div>
+
+        <div class="memory-label">AGGIUNGI NUOVO UTENTE</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center;margin-bottom:16px">
+            <input id="newUsername" placeholder="Username" style="background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.2);color:#fff;font-family:inherit;font-size:11px;padding:7px 10px;outline:none">
+            <input id="newPassword" type="password" placeholder="Password" style="background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.2);color:#fff;font-family:inherit;font-size:11px;padding:7px 10px;outline:none">
+            <select id="newRole" style="background:rgba(0,20,40,0.9);border:1px solid rgba(0,229,255,0.2);color:var(--arc);font-family:inherit;font-size:11px;padding:7px 8px;outline:none">
+                <option value="user">USER</option>
+                <option value="admin">ADMIN</option>
+            </select>
+            <button class="mem-btn" onclick="addUser()">+ ADD</button>
+        </div>
+
+        <div id="admin-msg" style="font-size:10px;letter-spacing:2px;color:var(--green);min-height:16px;margin-bottom:12px"></div>
+        <div class="memory-actions">
+            <button class="mem-btn" onclick="closeAll()">CHIUDI</button>
         </div>
     </div>
 
@@ -697,6 +729,31 @@
         }
 
         // ── MEMORIA ──
+        // ── CHECK ROLE AT STARTUP ──
+        (async function() {
+            try {
+                const res = await fetch('/me');
+                const data = await res.json();
+                if (data.role === 'admin') {
+                    document.getElementById('adminBtn').style.display = 'inline-block';
+                }
+                // Show username in header
+                const statusSub = document.querySelector('.status-sub');
+                if (statusSub) statusSub.textContent = `OPERATORE: ${data.username.toUpperCase()}`;
+            } catch(e) {}
+        })();
+
+        async function doLogout() {
+            await fetch('/logout', { method: 'POST' });
+            window.location.href = '/';
+        }
+
+        function closeAll() {
+            document.getElementById('memoryPanel').classList.remove('open');
+            document.getElementById('adminPanel').classList.remove('open');
+            document.getElementById('overlay').classList.remove('open');
+        }
+
         async function openMemory() {
             try {
                 const res = await fetch('/memory');
@@ -714,16 +771,91 @@
             document.getElementById('overlay').classList.add('open');
         }
 
-        function closeMemory() {
-            document.getElementById('memoryPanel').classList.remove('open');
-            document.getElementById('overlay').classList.remove('open');
-        }
-
         async function clearMemory() {
             if (!confirm('Cancellare tutta la memoria di Jervis?')) return;
             await fetch('/memory/clear', { method: 'POST' });
-            closeMemory();
+            closeAll();
             addMessage('jervis', 'Memoria cancellata. Sono pronto a ricominciare da capo, Signore.');
+        }
+
+        // ── ADMIN ──
+        async function openAdmin() {
+            await loadUsers();
+            document.getElementById('adminPanel').classList.add('open');
+            document.getElementById('overlay').classList.add('open');
+        }
+
+        async function loadUsers() {
+            const res = await fetch('/admin/users');
+            const users = await res.json();
+            const el = document.getElementById('users-list');
+            el.innerHTML = Object.entries(users).map(([u, v]) => `
+                <div class="memory-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <span style="flex:1">${u} <span style="opacity:0.5;font-size:10px">[${v.role}]</span></span>
+                    <input type="password" id="pw_${u}" placeholder="Nuova password" style="flex:1;background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.15);color:#fff;font-family:inherit;font-size:10px;padding:4px 8px;outline:none">
+                    <button class="mem-btn" style="padding:4px 10px;font-size:9px" onclick="changeUserPw('${u}')">✓</button>
+                    <button class="mem-btn danger" style="padding:4px 10px;font-size:9px" onclick="deleteUser('${u}')">✕</button>
+                </div>
+            `).join('');
+        }
+
+        async function changeUserPw(username) {
+            const pw = document.getElementById(`pw_${username}`).value.trim();
+            if (!pw) return showAdminMsg('Inserisci una password', true);
+            const res = await fetch(`/admin/users/${username}/password`, {
+                method: 'PUT',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({password: pw})
+            });
+            const data = await res.json();
+            showAdminMsg(data.ok ? `Password di ${username} aggiornata` : data.error, !data.ok);
+        }
+
+        async function deleteUser(username) {
+            if (!confirm(`Eliminare l'utente "${username}"?`)) return;
+            const res = await fetch(`/admin/users/${username}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.ok) { await loadUsers(); showAdminMsg(`Utente ${username} eliminato`); }
+            else showAdminMsg(data.error, true);
+        }
+
+        async function addUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value.trim();
+            const role = document.getElementById('newRole').value;
+            if (!username || !password) return showAdminMsg('Username e password obbligatori', true);
+            const res = await fetch('/admin/users', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({username, password, role})
+            });
+            const data = await res.json();
+            if (data.ok) {
+                document.getElementById('newUsername').value = '';
+                document.getElementById('newPassword').value = '';
+                await loadUsers();
+                showAdminMsg(`Utente ${username} creato`);
+            } else showAdminMsg(data.error, true);
+        }
+
+        async function changeMyPw() {
+            const pw = document.getElementById('myNewPw').value.trim();
+            if (!pw) return showAdminMsg('Inserisci la nuova password', true);
+            const res = await fetch('/admin/my-password', {
+                method: 'PUT',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({password: pw})
+            });
+            const data = await res.json();
+            document.getElementById('myNewPw').value = '';
+            showAdminMsg(data.ok ? 'Password aggiornata!' : data.error, !data.ok);
+        }
+
+        function showAdminMsg(msg, isError) {
+            const el = document.getElementById('admin-msg');
+            el.style.color = isError ? 'var(--red)' : 'var(--green)';
+            el.textContent = (isError ? '⚠ ' : '✓ ') + msg;
+            setTimeout(() => el.textContent = '', 3000);
         }
 
         // ── ARC REACTOR click easter egg ──
