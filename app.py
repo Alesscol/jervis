@@ -16,7 +16,7 @@ app.secret_key = "jervis-super-secret-2026"
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
-GROQ_API_KEY  = os.environ.get("GROQ_API_KEY",  "QUI_LA_TUA_CHIAVE_GROQ")
+GROQ_API_KEY  = os.environ.get("GROQ_API_KEY",  "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")
 groq_client   = Groq(api_key=GROQ_API_KEY)
 
 # ── FILE UTENTI ───────────────────────────────────────────────────
