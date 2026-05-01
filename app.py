@@ -7,68 +7,124 @@ import requests
 import hashlib
 from flask import Flask, render_template, request, jsonify, session
 import edge_tts
-
 from groq import Groq
+from pymongo import MongoClient
 
 app = Flask(__name__)
-app.secret_key = "jervis-super-secret-2026"
+app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
-GROQ_API_KEY  = os.environ.get("GROQ_API_KEY", "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")
-groq_client   = Groq(api_key=GROQ_API_KEY)
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "QUI_LA_TUA_CHIAVE_GROQ")
+groq_client  = Groq(api_key=GROQ_API_KEY)
 
-# ── FILE ──────────────────────────────────────────────────────────
-USERS_FILE    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users.json")
-MEMORY_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jervis_memory.json")
-PRESENCE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presence.json")
+# ── MONGODB ───────────────────────────────────────────────────────
+MONGO_URI = os.environ.get("MONGO_URI", "")  # inserisci su Render come variabile env
 
+_mongo_client = None
+_db = None
+
+def get_db():
+    global _mongo_client, _db
+    if _db is None:
+        _mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        _db = _mongo_client["jervisdb"]
+    return _db
+
+# Sessioni attive in memoria {username: last_seen_timestamp}
 active_sessions = {}
 
-# ── PRESENZA ──────────────────────────────────────────────────────
-def load_presence():
-    if os.path.exists(PRESENCE_FILE):
-        try:
-            with open(PRESENCE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def save_presence(presence):
-    try:
-        with open(PRESENCE_FILE, "w", encoding="utf-8") as f:
-            json.dump(presence, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-def update_presence(username):
-    now = datetime.datetime.now().isoformat()
-    active_sessions[username] = now
-    presence = load_presence()
-    presence[username] = {"last_seen": now}
-    save_presence(presence)
-
-# ── UTENTI ────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════
+#  UTENTI
+# ══════════════════════════════════════════════════════════════════
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
 def load_users():
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+    try:
+        db = get_db()
+        docs = list(db.users.find({}, {"_id": 0}))
+        if docs:
+            return {d["username"]: {"password": d["password"], "role": d["role"]} for d in docs}
+    except Exception as e:
+        print(f"[MongoDB] load_users error: {e}")
+
+    # Primo avvio: crea admin di default
     default = {"admin": {"password": hash_pw("Jervis2026"), "role": "admin"}}
     save_users(default)
     return default
 
 def save_users(users):
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+    try:
+        db = get_db()
+        for username, data in users.items():
+            db.users.update_one(
+                {"username": username},
+                {"$set": {"username": username, "password": data["password"], "role": data["role"]}},
+                upsert=True
+            )
+    except Exception as e:
+        print(f"[MongoDB] save_users error: {e}")
 
+def delete_user_db(username):
+    try:
+        db = get_db()
+        db.users.delete_one({"username": username})
+    except Exception as e:
+        print(f"[MongoDB] delete_user error: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+#  PRESENZA
+# ══════════════════════════════════════════════════════════════════
+def update_presence(username):
+    now = datetime.datetime.now().isoformat()
+    active_sessions[username] = now
+    try:
+        db = get_db()
+        db.presence.update_one(
+            {"username": username},
+            {"$set": {"username": username, "last_seen": now}},
+            upsert=True
+        )
+    except Exception as e:
+        print(f"[MongoDB] update_presence error: {e}")
+
+def load_presence():
+    try:
+        db = get_db()
+        docs = list(db.presence.find({}, {"_id": 0}))
+        return {d["username"]: {"last_seen": d.get("last_seen", "")} for d in docs}
+    except Exception as e:
+        print(f"[MongoDB] load_presence error: {e}")
+        return {}
+
+# ══════════════════════════════════════════════════════════════════
+#  MEMORIA
+# ══════════════════════════════════════════════════════════════════
+def load_memory():
+    try:
+        db = get_db()
+        doc = db.memory.find_one({"_id": "jervis_memory"})
+        if doc:
+            doc.pop("_id", None)
+            return doc
+    except Exception as e:
+        print(f"[MongoDB] load_memory error: {e}")
+    return {"facts": [], "conversations": [], "user_name": "Signore"}
+
+def save_memory(memory):
+    try:
+        db = get_db()
+        data = dict(memory)
+        data["_id"] = "jervis_memory"
+        db.memory.replace_one({"_id": "jervis_memory"}, data, upsert=True)
+    except Exception as e:
+        print(f"[MongoDB] save_memory error: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+#  DECORATORI AUTH
+# ══════════════════════════════════════════════════════════════════
 def require_login(f):
     from functools import wraps
     @wraps(f)
@@ -87,13 +143,14 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
-# ── GENERAZIONE IMMAGINI ──────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════
+#  IMMAGINI & AI
+# ══════════════════════════════════════════════════════════════════
 def genera_immagine(prompt):
     prompt_enc = requests.utils.quote(prompt)
     seed = random.randint(1, 99999)
     return f"https://image.pollinations.ai/prompt/{prompt_enc}?width=768&height=512&nologo=true&seed={seed}"
 
-# ── ANALISI IMMAGINE ──────────────────────────────────────────────
 def analizza_immagine(image_b64, media_type, domanda):
     try:
         response = groq_client.chat.completions.create(
@@ -102,29 +159,15 @@ def analizza_immagine(image_b64, media_type, domanda):
                 {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{image_b64}"}},
                 {"type": "text", "text": f"Sei JERVIS. Rispondi in italiano, breve e preciso. {domanda}"}
             ]}],
-            max_tokens=2000,
+            max_tokens=500,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Non riesco ad analizzare l'immagine: {e}"
 
-# ── MEMORIA ───────────────────────────────────────────────────────
-def load_memory():
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"facts": [], "conversations": [], "user_name": "Signore"}
-
-def save_memory(memory):
-    try:
-        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(memory, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
+# ══════════════════════════════════════════════════════════════════
+#  LOGICA MEMORIA / PROMPT
+# ══════════════════════════════════════════════════════════════════
 def extract_facts(user_msg, jarvis_reply, memory):
     for kw in ["mi chiamo", "il mio nome è", "chiamami"]:
         if kw in user_msg.lower():
@@ -174,7 +217,9 @@ CONVERSAZIONI RECENTI:
 Oggi è {datetime.datetime.now().strftime('%A %d %B %Y, ore %H:%M')}.
 """
 
-# ── TTS ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════
+#  TTS
+# ══════════════════════════════════════════════════════════════════
 async def generate_voice(text, filepath):
     try:
         communicate = edge_tts.Communicate(text, "it-IT-GiuseppeNeural")
@@ -225,7 +270,7 @@ def me():
     return jsonify({"error": "Non loggato"}), 401
 
 # ══════════════════════════════════════════════════════════════════
-#  ROUTE ADMIN
+#  ROUTE ADMIN — GESTIONE UTENTI
 # ══════════════════════════════════════════════════════════════════
 @app.route('/admin/users', methods=['GET'])
 @require_login
@@ -260,8 +305,7 @@ def delete_user(username):
     users = load_users()
     if username not in users:
         return jsonify({"error": "Utente non trovato"}), 404
-    del users[username]
-    save_users(users)
+    delete_user_db(username)
     return jsonify({"ok": True})
 
 @app.route('/admin/users/<username>/password', methods=['PUT'])
@@ -276,7 +320,7 @@ def change_password(username):
     if username not in users:
         return jsonify({"error": "Utente non trovato"}), 404
     users[username]["password"] = hash_pw(new_pw)
-    save_users(users)
+    save_users({username: users[username]})
     return jsonify({"ok": True})
 
 @app.route('/admin/my-password', methods=['PUT'])
@@ -288,7 +332,7 @@ def change_my_password():
         return jsonify({"error": "Password obbligatoria"}), 400
     users = load_users()
     users[session["username"]]["password"] = hash_pw(new_pw)
-    save_users(users)
+    save_users({session["username"]: users[session["username"]]})
     return jsonify({"ok": True})
 
 @app.route('/admin/presence', methods=['GET'])
@@ -326,11 +370,11 @@ def get_presence():
 def chat():
     try:
         data = request.get_json()
-        user_input = data.get('msg', '').strip()
+        user_input    = data.get('msg', '').strip()
         session_history = data.get('history', [])
-        image_b64 = data.get('image_b64', None)
-        image_type = data.get('image_type', 'image/jpeg')
-        username = session.get("username", "Signore")
+        image_b64     = data.get('image_b64', None)
+        image_type    = data.get('image_type', 'image/jpeg')
+        username      = session.get("username", "Signore")
         if username != "Signore":
             update_presence(username)
 
@@ -339,20 +383,14 @@ def chat():
 
         memory = load_memory()
 
-        # Immagine caricata dall'utente
         if image_b64:
             domanda = user_input if user_input else "Descrivi questa immagine in dettaglio."
             answer = analizza_immagine(image_b64, image_type, domanda)
             extract_facts(user_input or "[immagine]", answer, memory)
             return jsonify({'response': answer})
 
-        # Generazione immagine
-        gen_kw = gen_kw = ["genera un'immagine", "genera l'immagine", "crea un'immagine", "crea l'immagine",
-          "disegna", "genera una foto", "genera la foto", "crea una foto", 
-          "fai un'immagine", "fai l'immagine", "crea un disegno",
-          "genera un", "crea un", "fammi vedere", "mostrami",
-          "mi faresti", "mi fai", "puoi farmi", "fammi", "voglio vedere",
-          "un'immagine di", "una foto di", "un disegno di"]
+        gen_kw = ["genera un'immagine", "crea un'immagine", "disegna", "genera una foto",
+                  "crea una foto", "fai un'immagine", "crea un disegno", "genera un"]
         if any(k in user_input.lower() for k in gen_kw):
             prompt = user_input
             for k in sorted(gen_kw, key=len, reverse=True):
@@ -362,23 +400,21 @@ def chat():
             extract_facts(user_input, answer, memory)
             return jsonify({'response': answer, 'image_url': img_url})
 
-        # Chat normale
         messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
         for turn in session_history[-10:]:
-            messages.append({"role": "user", "content": turn['user']})
-            messages.append({"role": "assistant", "content": turn['jervis']})
+            messages.append({"role": "user",      "content": turn['user']})
+            messages.append({"role": "assistant",  "content": turn['jervis']})
         messages.append({"role": "user", "content": user_input})
 
         try:
             response = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
-                max_tokens=2000,
+                max_tokens=300,
                 temperature=0.7,
             )
             answer = response.choices[0].message.content.strip()
         except Exception as e:
-            print(f"Errore Groq: {e}")
             answer = "Sistemi temporaneamente irraggiungibili, Signore."
 
         extract_facts(user_input, answer, memory)
@@ -388,11 +424,9 @@ def chat():
         os.makedirs(static_dir, exist_ok=True)
         for f in os.listdir(static_dir):
             if f.startswith("voice_"):
-                try:
-                    os.remove(os.path.join(static_dir, f))
-                except:
-                    pass
-        filename = f"voice_{random.randint(10000, 99999)}.mp3"
+                try: os.remove(os.path.join(static_dir, f))
+                except: pass
+        filename = f"voice_{random.randint(10000,99999)}.mp3"
         run_async(generate_voice(audio_text, os.path.join(static_dir, filename)))
 
         return jsonify({'response': answer, 'audio_url': f'/static/{filename}'})
@@ -401,14 +435,15 @@ def chat():
         print(f"ERRORE: {e}")
         return jsonify({'response': "Errore critico nei sistemi."})
 
-# ── MEMORIA ───────────────────────────────────────────────────────
 @app.route('/memory', methods=['GET'])
 @require_login
 def get_memory():
     memory = load_memory()
-    return jsonify({'user_name': memory.get('user_name', 'Signore'),
-                    'facts': memory.get('facts', []),
-                    'total_conversations': len(memory.get('conversations', []))})
+    return jsonify({
+        'user_name': memory.get('user_name', 'Signore'),
+        'facts': memory.get('facts', []),
+        'total_conversations': len(memory.get('conversations', []))
+    })
 
 @app.route('/memory/clear', methods=['POST'])
 @require_login
