@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.E.R.V.I.S. // ACCESSO</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --arc: #00e5ff;
+            --arc-glow: rgba(0,229,255,0.5);
+            --green: #00ff88;
+            --red: #ff4444;
+            --bg: #000a12;
+            --border: rgba(0,229,255,0.2);
+            --text-dim: rgba(0,229,255,0.5);
+        }
+        body {
+            background: var(--bg);
+            color: var(--arc);
+            font-family: 'Share Tech Mono', monospace;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        /* Grid background */
+        body::before {
+            content: '';
+            position: fixed; inset: 0;
+            background:
+                radial-gradient(ellipse 80% 60% at 50% 50%, rgba(0,50,100,0.15) 0%, transparent 70%),
+                repeating-linear-gradient(0deg, transparent, transparent 59px, rgba(0,229,255,0.025) 59px, rgba(0,229,255,0.025) 60px),
+                repeating-linear-gradient(90deg, transparent, transparent 59px, rgba(0,229,255,0.025) 59px, rgba(0,229,255,0.025) 60px);
+            pointer-events: none;
+        }
+        /* Scanlines */
+        body::after {
+            content: '';
+            position: fixed; inset: 0;
+            background: repeating-linear-gradient(0deg, transparent 0px, transparent 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px);
+            pointer-events: none;
+            z-index: 100;
+        }
+        /* Rings */
+        .ring {
+            position: fixed; border-radius: 50%;
+            top: 50%; left: 50%; transform: translate(-50%,-50%);
+            pointer-events: none; animation: spin linear infinite;
+        }
+        .ring:nth-child(1) { width:700px;height:700px;border:1px dashed rgba(0,229,255,0.05);animation-duration:60s; }
+        .ring:nth-child(2) { width:1100px;height:1100px;border:1px solid rgba(0,229,255,0.03);animation-duration:90s;animation-direction:reverse; }
+        @keyframes spin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+        .login-box {
+            position: relative; z-index: 10;
+            width: 400px;
+            border: 1px solid rgba(0,229,255,0.25);
+            background: rgba(0,10,20,0.92);
+            padding: 48px 40px;
+            box-shadow: 0 0 60px rgba(0,229,255,0.08), inset 0 0 40px rgba(0,20,40,0.5);
+            animation: fadeIn 0.8s ease both;
+        }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+        /* Corner decorations */
+        .login-box::before, .login-box::after {
+            content: '';
+            position: absolute;
+            width: 16px; height: 16px;
+        }
+        .login-box::before {
+            top: -1px; left: -1px;
+            border-top: 2px solid var(--arc);
+            border-left: 2px solid var(--arc);
+        }
+        .login-box::after {
+            bottom: -1px; right: -1px;
+            border-bottom: 2px solid var(--arc);
+            border-right: 2px solid var(--arc);
+        }
+
+        .arc-reactor {
+            width: 70px; height: 70px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 38% 38%, #fff 0%, #80f0ff 20%, var(--arc) 45%, #003060 75%);
+            box-shadow: 0 0 30px var(--arc-glow), 0 0 80px rgba(0,229,255,0.2);
+            margin: 0 auto 24px;
+            animation: pulse 2.8s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%,100% { box-shadow: 0 0 30px var(--arc-glow), 0 0 80px rgba(0,229,255,0.2); }
+            50% { box-shadow: 0 0 50px var(--arc-glow), 0 0 120px rgba(0,229,255,0.35); }
+        }
+
+        h1 {
+            font-family: 'Orbitron', monospace;
+            font-size: 20px; font-weight: 900;
+            letter-spacing: 6px; text-align: center;
+            background: linear-gradient(90deg, #fff 0%, var(--arc) 60%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            margin-bottom: 4px;
+        }
+        .subtitle {
+            text-align: center; font-size: 9px;
+            letter-spacing: 3px; color: var(--text-dim);
+            margin-bottom: 36px;
+        }
+
+        .field-label {
+            font-size: 9px; letter-spacing: 3px;
+            color: var(--text-dim); margin-bottom: 6px;
+        }
+        .field {
+            width: 100%;
+            background: rgba(0,20,40,0.6);
+            border: 1px solid var(--border);
+            color: rgba(255,255,255,0.9);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 13px;
+            padding: 10px 14px;
+            outline: none;
+            caret-color: var(--arc);
+            transition: border-color 0.2s;
+            margin-bottom: 18px;
+        }
+        .field:focus { border-color: rgba(0,229,255,0.5); }
+
+        .btn-login {
+            width: 100%;
+            background: rgba(0,229,255,0.1);
+            border: 1px solid rgba(0,229,255,0.4);
+            color: var(--arc);
+            font-family: 'Orbitron', monospace;
+            font-size: 11px; font-weight: 700;
+            letter-spacing: 3px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 8px;
+        }
+        .btn-login:hover {
+            background: rgba(0,229,255,0.2);
+            box-shadow: 0 0 20px rgba(0,229,255,0.2);
+        }
+        .btn-login:active { transform: scale(0.98); }
+
+        .error-msg {
+            color: var(--red);
+            font-size: 10px; letter-spacing: 2px;
+            text-align: center; margin-top: 14px;
+            min-height: 16px;
+        }
+
+        .status-bar {
+            display: flex; align-items: center; justify-content: center;
+            gap: 6px; margin-bottom: 28px;
+        }
+        .status-dot { width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s ease-in-out infinite; }
+        @keyframes blink { 0%,100%{opacity:1}50%{opacity:0.3} }
+        .status-text { font-size:9px;color:var(--green);letter-spacing:2px; }
+    </style>
+</head>
+<body>
+    <div class="ring"></div>
+    <div class="ring"></div>
+
+    <div class="login-box">
+        <div class="arc-reactor"></div>
+        <h1>J.E.R.V.I.S.</h1>
+        <p class="subtitle">SISTEMA DI AUTENTICAZIONE // STARK INDUSTRIES</p>
+        <div class="status-bar">
+            <div class="status-dot"></div>
+            <span class="status-text">SISTEMI ONLINE — IDENTIFICAZIONE RICHIESTA</span>
+        </div>
+
+        <div class="field-label">▶ IDENTIFICATIVO OPERATORE</div>
+        <input class="field" type="text" id="username" placeholder="username" autocomplete="off">
+
+        <div class="field-label">▶ CODICE DI ACCESSO</div>
+        <input class="field" type="password" id="password" placeholder="••••••••">
+
+        <button class="btn-login" onclick="doLogin()">ACCEDI AI SISTEMI</button>
+        <div class="error-msg" id="error-msg"></div>
+    </div>
+
+    <script>
+        document.addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+
+        async function doLogin() {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const errEl = document.getElementById('error-msg');
+            errEl.textContent = '';
+
+            if (!username || !password) {
+                errEl.textContent = '⚠ INSERIRE CREDENZIALI';
+                return;
+            }
+
+            try {
+                const res = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    window.location.href = '/';
+                } else {
+                    errEl.textContent = '⚠ ACCESSO NEGATO — CREDENZIALI ERRATE';
+                }
+            } catch(e) {
+                errEl.textContent = '⚠ ERRORE DI CONNESSIONE';
+            }
+        }
+    </script>
+</body>
+</html>
