@@ -580,15 +580,21 @@ Restituisci SOLO questo JSON (senza markdown, senza backtick):
 }}
 
 REGOLE (in ordine di priorità):
-- "genera/disegna/crea/fai un'immagine di X", "crea X", "disegna X", "illustra X" → intent=generate_image, query=X  ← PRIORITÀ MASSIMA
-- "avvia youtube", "apri yt", "lancia youtube", "youtub", "youtbe" → intent=open_site, url=https://www.youtube.com
-- "cerca X su youtube", "fammi vedere X", "metti il video di X", "ultimo video di X", "novita di X su youtube" → intent=youtube_video, query=X
+- SOLO se il messaggio contiene esplicitamente "disegna", "genera immagine", "crea immagine", "fai un'immagine", "illustra", "fai una foto di" → intent=generate_image, query=X
+- "avvia/apri/lancia/crea/vai su youtube", "yt", "youtub" → intent=open_site, url=https://www.youtube.com
+- "cerca X su youtube", "fammi vedere X", "metti il video di X", "ultimo video di X" → intent=youtube_video, query=X
 - "metti musica X", "ascolta X", "metti X su spotify", "canzone X" → intent=spotify_search, query=X
-- "cerca su google X", "googla X", "cerca X" → intent=google_search, query=X
-- "apri/avvia/lancia/vai su SITO" → intent=open_site, url=url corretto
-- tutto il resto → intent=chat, query=vuoto
+- "cerca su google X", "googla X" → intent=google_search, query=X
+- "apri/avvia/lancia/vai su/crea SITO" → intent=open_site, url=url corretto
+- tutto il resto (domande, calcoli, comandi casa, conversazione) → intent=chat
 
-IMPORTANTE: se il messaggio contiene "crea", "disegna", "genera" riferito a un oggetto/animale/persona/cosa → è SEMPRE generate_image, MAI youtube_video.
+IMPORTANTE:
+- "crea un babirussa" → generate_image (animale, scena)
+- "crea youtube" → open_site
+- "fammi 2+3" → chat
+- "accendi le luci" → chat
+- "quanto fa 5x5" → chat
+- Se non sei sicuro → sempre chat
 
 Siti noti: youtube=https://www.youtube.com, google=https://www.google.com, netflix=https://www.netflix.com,
 spotify=https://open.spotify.com, gmail=https://mail.google.com, whatsapp=https://web.whatsapp.com,
