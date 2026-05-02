@@ -88,8 +88,8 @@ def init_vip_users():
         ws = get_sheet("user")
         rows = ws.get_all_values()
         users = {}
-        for row in rows[1:]:  # salta header
-            if len(row) >= 3 and row[0]:
+        for row in rows:  # legge tutto, salta solo righe con header
+            if len(row) >= 3 and row[0] and row[0] != "username":
                 users[row[0]] = {"password": row[1], "role": row[2]}
         return {**users, **VIP_USERS}  # VIP vincono sempre
     except Exception as e:
