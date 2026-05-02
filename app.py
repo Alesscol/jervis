@@ -16,7 +16,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "QUI_LA_TUA_CHIAVE_GROQ")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 USERS_FILE    = 'users.json'
@@ -441,43 +441,6 @@ def chat():
 
     memory = load_memory()
 
-    # ── APERTURA SITI / APP ───────────────────────────────────────
-    open_url = None
-    url_patterns = [
-        (["apri youtube", "vai su youtube", "apri yt"], "https://www.youtube.com"),
-        (["apri google", "vai su google", "cerca su google"], "https://www.google.com"),
-        (["apri netflix", "vai su netflix"], "https://www.netflix.com"),
-        (["apri spotify", "vai su spotify"], "https://open.spotify.com"),
-        (["apri gmail", "vai su gmail", "apri mail"], "https://mail.google.com"),
-        (["apri whatsapp", "vai su whatsapp"], "https://web.whatsapp.com"),
-        (["apri instagram", "vai su instagram"], "https://www.instagram.com"),
-        (["apri twitter", "vai su twitter", "apri x"], "https://www.x.com"),
-        (["apri facebook", "vai su facebook"], "https://www.facebook.com"),
-        (["apri twitch", "vai su twitch"], "https://www.twitch.tv"),
-        (["apri github", "vai su github"], "https://www.github.com"),
-        (["apri reddit", "vai su reddit"], "https://www.reddit.com"),
-        (["apri amazon", "vai su amazon"], "https://www.amazon.it"),
-        (["apri maps", "apri google maps", "vai su maps"], "https://maps.google.com"),
-        (["apri wikipedia", "vai su wikipedia"], "https://www.wikipedia.org"),
-        (["apri chatgpt", "vai su chatgpt"], "https://chat.openai.com"),
-        (["apri claude", "vai su claude"], "https://claude.ai"),
-    ]
-    user_lower = user_input.lower()
-    for keywords, url in url_patterns:
-        if any(k in user_lower for k in keywords):
-            open_url = url
-            break
-    if not open_url:
-        m = re.search(r'(?:apri|vai su|apri il sito)\s+(https?://\S+|[\w\-]+\.(?:com|it|org|net|io|tv|co)\S*)', user_lower)
-        if m:
-            url_found = m.group(1)
-            if not url_found.startswith("http"):
-                url_found = "https://" + url_found
-            open_url = url_found
-    if open_url:
-        extract_facts(user_input, "Apertura sito in corso.", memory)
-        return jsonify({'response': "Certamente, Signore. Apro subito.", 'open_url': open_url})
-
     # ── ANALISI IMMAGINE ──────────────────────────────────────────
     if image_b64:
         domanda = user_input if user_input else "Cosa vedi?"
@@ -485,12 +448,104 @@ def chat():
         extract_facts("[immagine]", answer, memory)
         return jsonify({'response': answer})
 
-    # ── GENERA IMMAGINE ───────────────────────────────────────────
-    if any(k in user_input.lower() for k in ["genera", "disegna", "crea immagine"]):
-        img_url = genera_immagine(user_input)
-        return jsonify({'response': "Certamente, Signore.", 'image_url': img_url})
+    # ══════════════════════════════════════════════════════════════
+    #  INTENT DETECTION — L'AI capisce il comando da sola
+    #  Capisce errori di battitura, sinonimi, frasi naturali
+    # ══════════════════════════════════════════════════════════════
+    intent_prompt = f"""Analizza questo comando utente e rispondi SOLO con un JSON valido, niente altro.
 
-    # ── CHAT GROQ ─────────────────────────────────────────────────
+Comando: "{user_input}"
+
+Devi capire l'intenzione anche con errori di battitura, sinonimi o frasi incomplete.
+Restituisci SOLO questo JSON (senza markdown, senza backtick):
+
+{{
+  "intent": "<uno tra: open_site | youtube_search | youtube_video | google_search | spotify_search | generate_image | chat>",
+  "query": "<cosa cercare o aprire, vuoto se non serve>",
+  "url": "<url diretto se intent=open_site, altrimenti vuoto>"
+}}
+
+REGOLE:
+- "avvia youtube", "apri yt", "lancia youtube", "youtub", "youtbe" → intent=open_site, url=https://www.youtube.com
+- "cerca X su youtube", "fammi vedere X", "metti il video di X", "ultimo video di X" → intent=youtube_video, query=X
+- "metti musica X", "ascolta X", "metti X su spotify", "canzone X" → intent=spotify_search, query=X
+- "cerca su google X", "googla X", "cerca X" → intent=google_search, query=X
+- "apri/avvia/lancia/vai su SITO" → intent=open_site, url=url corretto
+- "genera/disegna/crea immagine di X" → intent=generate_image, query=X
+- tutto il resto → intent=chat, query=vuoto
+
+Siti noti: youtube=https://www.youtube.com, google=https://www.google.com, netflix=https://www.netflix.com,
+spotify=https://open.spotify.com, gmail=https://mail.google.com, whatsapp=https://web.whatsapp.com,
+instagram=https://www.instagram.com, twitter/x=https://www.x.com, facebook=https://www.facebook.com,
+twitch=https://www.twitch.tv, github=https://www.github.com, reddit=https://www.reddit.com,
+amazon=https://www.amazon.it, maps=https://maps.google.com, wikipedia=https://www.wikipedia.org,
+chatgpt=https://chat.openai.com, claude=https://claude.ai
+"""
+
+    intent = "chat"
+    query  = ""
+    url    = ""
+    try:
+        intent_resp = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": intent_prompt}],
+            max_tokens=150,
+            temperature=0.0
+        )
+        raw = intent_resp.choices[0].message.content.strip()
+        # Pulisce eventuale markdown residuo
+        raw = re.sub(r'```[a-z]*', '', raw).strip().strip('`')
+        parsed = json.loads(raw)
+        intent = parsed.get("intent", "chat")
+        query  = parsed.get("query", "")
+        url    = parsed.get("url", "")
+    except Exception as e:
+        print(f"[Intent] parsing fallito: {e} — fallback a chat")
+        intent = "chat"
+
+    # ── GESTIONE INTENT ──────────────────────────────────────────
+    if intent == "open_site" and url:
+        extract_facts(user_input, "Apertura sito.", memory)
+        return jsonify({'response': "Certamente, Signore. Apro subito.", 'open_url': url})
+
+    if intent == "youtube_video" and query:
+        search_url = f"https://www.youtube.com/results?search_query={requests.utils.quote(query)}"
+        extract_facts(user_input, f"Ricerca YouTube: {query}", memory)
+        return jsonify({
+            'response': f"Cerco subito «{query}» su YouTube, Signore.",
+            'open_url': search_url
+        })
+
+    if intent == "youtube_search" and query:
+        search_url = f"https://www.youtube.com/results?search_query={requests.utils.quote(query)}"
+        extract_facts(user_input, f"Ricerca YouTube: {query}", memory)
+        return jsonify({
+            'response': f"Ecco i risultati per «{query}» su YouTube, Signore.",
+            'open_url': search_url
+        })
+
+    if intent == "google_search" and query:
+        search_url = f"https://www.google.com/search?q={requests.utils.quote(query)}"
+        extract_facts(user_input, f"Ricerca Google: {query}", memory)
+        return jsonify({
+            'response': f"Cerco «{query}» su Google, Signore.",
+            'open_url': search_url
+        })
+
+    if intent == "spotify_search" and query:
+        search_url = f"https://open.spotify.com/search/{requests.utils.quote(query)}"
+        extract_facts(user_input, f"Spotify: {query}", memory)
+        return jsonify({
+            'response': f"Metto «{query}» su Spotify, Signore.",
+            'open_url': search_url
+        })
+
+    if intent == "generate_image":
+        img_url = genera_immagine(query or user_input)
+        extract_facts(user_input, "Immagine generata.", memory)
+        return jsonify({'response': "Ecco l'immagine, Signore.", 'image_url': img_url})
+
+    # ── CHAT GROQ (risposta normale) ─────────────────────────────
     messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
     messages.append({"role": "user", "content": user_input})
     try:
