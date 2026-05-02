@@ -15,22 +15,6 @@ from groq import Groq
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 
-# Inizializza VIP su Sheets all'avvio (funziona sia con python che gunicorn)
-try:
-    init_vip_users_pending = True
-except:
-    init_vip_users_pending = False
-
-@app.before_request
-def startup():
-    global init_vip_users_pending
-    if init_vip_users_pending:
-        init_vip_users_pending = False
-        try:
-            init_vip_users()
-        except:
-            pass
-
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
@@ -414,6 +398,18 @@ def run_async(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+init_vip_users_pending = True
+
+@app.before_request
+def startup():
+    global init_vip_users_pending
+    if init_vip_users_pending:
+        init_vip_users_pending = False
+        try:
+            init_vip_users()
+        except Exception as e:
+            print(f"[startup] init_vip_users error: {e}")
 
 # ══════════════════════════════════════════════════════════════════
 #  ROUTES AUTH
