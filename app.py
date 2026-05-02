@@ -29,9 +29,10 @@ SHEET_ID = "1Iz1e8_Vgl6X6HlmPqSWx-j5oIo7G5nFxRSzLVfftd9c"
 def get_sheets_client():
     creds_json = os.environ.get("GOOGLE_CREDS_JSON")
     if creds_json:
+        # Render a volte escapa i \n — li ripristiniamo
+        creds_json = creds_json.replace("\\n", "\n")
         creds_dict = json.loads(creds_json)
     else:
-        # Fallback locale per sviluppo
         with open("jervis-credentials.json", "r") as f:
             creds_dict = json.load(f)
 
