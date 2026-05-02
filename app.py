@@ -422,11 +422,12 @@ def login():
     users = load_users()
     user = users.get(username)
     if user and user["password"] == hash_pw(password):
-        # Evita sessioni duplicate se già loggato
-        if session.get("username") != username:
-            session["username"] = username
-            session["role"] = user["role"]
-            update_presence(username)
+        already_logged = session.get("username") == username and session.get("session_recorded")
+        session["username"] = username
+        session["role"] = user["role"]
+        update_presence(username)
+        if not already_logged:
+            session["session_recorded"] = True
             record_login(username)
         return jsonify({"ok": True, "role": user["role"]})
     return jsonify({"ok": False, "error": "Username o password errati"}), 401
