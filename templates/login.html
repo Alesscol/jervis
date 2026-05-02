@@ -192,7 +192,7 @@
     </div>
 
     <script>
-        document.addEventListener('keypress', e => { if (e.key === 'Enter') doLogin(); });
+        document.addEventListener('keypress', e => { if (e.key === 'Enter' && document.activeElement.tagName !== 'BUTTON') doLogin(); });
 
         function togglePw(id) {
             const el = document.getElementById(id);
