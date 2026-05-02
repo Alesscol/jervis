@@ -16,7 +16,8 @@ app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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
+")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 USERS_FILE    = 'users.json'
@@ -465,14 +466,16 @@ Restituisci SOLO questo JSON (senza markdown, senza backtick):
   "url": "<url diretto se intent=open_site, altrimenti vuoto>"
 }}
 
-REGOLE:
+REGOLE (in ordine di priorità):
+- "genera/disegna/crea/fai un'immagine di X", "crea X", "disegna X", "illustra X" → intent=generate_image, query=X  ← PRIORITÀ MASSIMA
 - "avvia youtube", "apri yt", "lancia youtube", "youtub", "youtbe" → intent=open_site, url=https://www.youtube.com
-- "cerca X su youtube", "fammi vedere X", "metti il video di X", "ultimo video di X" → intent=youtube_video, query=X
+- "cerca X su youtube", "fammi vedere X", "metti il video di X", "ultimo video di X", "novita di X su youtube" → intent=youtube_video, query=X
 - "metti musica X", "ascolta X", "metti X su spotify", "canzone X" → intent=spotify_search, query=X
 - "cerca su google X", "googla X", "cerca X" → intent=google_search, query=X
 - "apri/avvia/lancia/vai su SITO" → intent=open_site, url=url corretto
-- "genera/disegna/crea immagine di X" → intent=generate_image, query=X
 - tutto il resto → intent=chat, query=vuoto
+
+IMPORTANTE: se il messaggio contiene "crea", "disegna", "genera" riferito a un oggetto/animale/persona/cosa → è SEMPRE generate_image, MAI youtube_video.
 
 Siti noti: youtube=https://www.youtube.com, google=https://www.google.com, netflix=https://www.netflix.com,
 spotify=https://open.spotify.com, gmail=https://mail.google.com, whatsapp=https://web.whatsapp.com,
