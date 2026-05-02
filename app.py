@@ -159,11 +159,19 @@ def load_presence():
 #  ATTIVITÀ — Google Sheets (tab "activity")
 #  Colonne: username | login | logout | duration | messages | total_messages
 # ══════════════════════════════════════════════════════════════════
+_last_login_time = {}
+
 def record_login(username):
+    global _last_login_time
+    now = datetime.datetime.now()
+    last = _last_login_time.get(username)
+    if last and (now - last).total_seconds() < 5:
+        print(f"[Sheets] record_login: skip duplicato per {username}")
+        return
+    _last_login_time[username] = now
     try:
         ws = get_sheet("activity")
-        now = datetime.datetime.now().isoformat()
-        ws.insert_row([username, now, "", "", "0"], 2)
+        ws.insert_row([username, now.isoformat(), "", "", "0"], 2)
         print(f"[Sheets] record_login: riga inserita per {username}")
     except Exception as e:
         print(f"[Sheets] record_login ERRORE: {type(e).__name__}: {e}")
