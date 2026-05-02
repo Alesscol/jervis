@@ -15,6 +15,22 @@ from groq import Groq
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 
+# Inizializza VIP su Sheets all'avvio (funziona sia con python che gunicorn)
+try:
+    init_vip_users_pending = True
+except:
+    init_vip_users_pending = False
+
+@app.before_request
+def startup():
+    global init_vip_users_pending
+    if init_vip_users_pending:
+        init_vip_users_pending = False
+        try:
+            init_vip_users()
+        except:
+            pass
+
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
@@ -69,7 +85,22 @@ VIP_USERS = {
     "cristian": {"password": hash_pw("Kvaratskhelia"), "role": "user"},
 }
 
-def load_users():
+def init_vip_users():
+    """Scrive i VIP nel foglio user se non ci sono già — chiamata all'avvio."""
+    try:
+        ws = get_sheet("user")
+        rows = ws.get_all_values()
+        existing = {r[0] for r in rows if r}
+        # Aggiunge header se manca
+        if not rows:
+            ws.append_row(["username", "password_hash", "role"])
+        for username, data in VIP_USERS.items():
+            if username not in existing:
+                ws.append_row([username, data["password"], data["role"]])
+                print(f"[Sheets] VIP aggiunto: {username}")
+    except Exception as e:
+        print(f"[Sheets] init_vip_users error: {e}")
+
     try:
         ws = get_sheet("user")
         rows = ws.get_all_values()
@@ -651,5 +682,6 @@ def clear_memory():
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
+    init_vip_users()
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
