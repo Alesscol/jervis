@@ -148,12 +148,15 @@ def record_login(username):
     try:
         ws = get_sheet("activity")
         rows = ws.get_all_values()
+        print(f"[Sheets] record_login: foglio ha {len(rows)} righe")
         if not rows:
             ws.append_row(["username", "login", "logout", "duration", "messages"])
+            print(f"[Sheets] record_login: header aggiunto")
         now = datetime.datetime.now().isoformat()
         ws.append_row([username, now, "", "", "0"])
+        print(f"[Sheets] record_login: riga aggiunta per {username}")
     except Exception as e:
-        print(f"[Sheets] record_login error: {e}")
+        print(f"[Sheets] record_login ERRORE: {type(e).__name__}: {e}")
 
 def record_logout(username):
     try:
