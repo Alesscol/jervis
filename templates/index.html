@@ -524,8 +524,8 @@
             <div class="input-row">
                 <span class="input-prefix">CMD ></span>
                 <input type="text" id="userInput" placeholder="Inserisca un comando..." autocomplete="off">
-                <button class="btn-voice" id="uploadBtn" title="Carica immagine" onclick="document.getElementById('fileInput').click()">📎</button>
-                <input type="file" id="fileInput" accept="image/*" style="display:none">
+                <button class="btn-voice" id="uploadBtn" title="Carica file" onclick="document.getElementById('fileInput').click()">📎</button>
+                <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.py,.js,.html,.csv" style="display:none">
                 <button class="btn-voice" id="voiceBtn" title="Microfono">🎙</button>
                 <button class="btn-voice" id="stopBtn" title="Ferma voce" onclick="stopAudio()" style="display:none;border-color:rgba(255,68,68,0.5);color:rgba(255,68,68,0.8)">⏹</button>
                 <button class="btn-send" onclick="sendManual()">ESEGUI</button>
@@ -635,13 +635,35 @@
             const file = e.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = function(ev) {
-                const dataUrl = ev.target.result;
-                pendingImage = { b64: dataUrl.split(',')[1], type: file.type, dataUrl };
-                document.getElementById('img-preview').src = dataUrl;
-                document.getElementById('img-preview-wrap').style.display = 'flex';
-            };
-            reader.readAsDataURL(file);
+
+            if (file.type.startsWith('image/')) {
+                reader.onload = function(ev) {
+                    const dataUrl = ev.target.result;
+                    pendingImage = { b64: dataUrl.split(',')[1], type: file.type, dataUrl, fileType: 'image' };
+                    document.getElementById('img-preview').src = dataUrl;
+                    document.getElementById('img-preview-wrap').style.display = 'flex';
+                };
+                reader.readAsDataURL(file);
+            } else if (file.type === 'application/pdf') {
+                reader.onload = function(ev) {
+                    const b64 = btoa(String.fromCharCode(...new Uint8Array(ev.target.result)));
+                    pendingImage = { b64, type: 'application/pdf', dataUrl: null, fileType: 'pdf', name: file.name };
+                    document.getElementById('img-preview').src = '';
+                    document.getElementById('img-preview-wrap').style.display = 'flex';
+                    document.getElementById('img-preview').style.display = 'none';
+                    document.getElementById('img-preview-wrap').innerHTML = `<div style="color:var(--arc);font-size:11px;padding:8px">📄 ${file.name} <button onclick="removeImage()" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">✕</button></div>`;
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                // File di testo
+                reader.onload = function(ev) {
+                    const text = ev.target.result;
+                    pendingImage = { b64: btoa(unescape(encodeURIComponent(text))), type: 'text/plain', dataUrl: null, fileType: 'text', name: file.name };
+                    document.getElementById('img-preview-wrap').style.display = 'flex';
+                    document.getElementById('img-preview-wrap').innerHTML = `<div style="color:var(--arc);font-size:11px;padding:8px">📝 ${file.name} <button onclick="removeImage()" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">✕</button></div>`;
+                };
+                reader.readAsText(file);
+            }
         });
 
         function removeImage() {
@@ -711,12 +733,14 @@
             isWaiting = true;
 
             const imgPreview = pendingImage ? pendingImage.dataUrl : null;
-            addMessage('user', text || '📎 Immagine allegata', imgPreview);
+            addMessage('user', text || `📎 ${pendingImage?.name || 'File allegato'}`, imgPreview);
 
             const payload = { msg: text, history: conversationHistory };
             if (pendingImage) {
                 payload.image_b64 = pendingImage.b64;
                 payload.image_type = pendingImage.type;
+                payload.file_type = pendingImage.fileType || 'image';
+                payload.file_name = pendingImage.name || '';
             }
             removeImage();
             showTyping();
