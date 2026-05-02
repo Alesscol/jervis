@@ -6,6 +6,8 @@ import datetime
 import requests
 import hashlib
 import re
+import gspread
+from google.oauth2.service_account import Credentials
 from flask import Flask, render_template, request, jsonify, session
 import edge_tts
 from groq import Groq
@@ -16,127 +18,268 @@ app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 # ══════════════════════════════════════════════════════════════════
 #  CONFIGURAZIONE
 # ══════════════════════════════════════════════════════════════════
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "QUI_LA_TUA_CHIAVE_GROQ")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
-USERS_FILE    = 'users.json'
-MEMORY_FILE   = 'memory.json'
-PRESENCE_FILE = 'presence.json'
-ACTIVITY_FILE = 'activity.json'   # ← NUOVO: statistiche per utente
+SHEET_ID = "1Iz1e8_Vgl6X6HlmPqSWx-j5oIo7G5nFxRSzLVfftd9c"
 
 # ══════════════════════════════════════════════════════════════════
-#  UTILITY JSON
+#  GOOGLE SHEETS CLIENT
+# ══════════════════════════════════════════════════════════════════
+def get_sheets_client():
+    creds_json = os.environ.get("GOOGLE_CREDS_JSON")
+    if creds_json:
+        creds_dict = json.loads(creds_json)
+    else:
+        # Fallback locale per sviluppo
+        with open("jervis-credentials.json", "r") as f:
+            creds_dict = json.load(f)
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    return gspread.authorize(creds)
+
+def get_sheet(tab_name):
+    client = get_sheets_client()
+    sh = client.open_by_key(SHEET_ID)
+    try:
+        return sh.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab_name, rows=1000, cols=20)
+        return ws
+
+# ══════════════════════════════════════════════════════════════════
+#  UTILITY
 # ══════════════════════════════════════════════════════════════════
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
-def load_json(filename, default):
-    if os.path.exists(filename):
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return default
-    return default
-
-def save_json(filename, data):
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
 # ══════════════════════════════════════════════════════════════════
-#  GESTIONE UTENTI
+#  GESTIONE UTENTI — Google Sheets (tab "user")
+#  Colonne: username | password_hash | role
 # ══════════════════════════════════════════════════════════════════
+VIP_USERS = {
+    "admin":    {"password": hash_pw("alessandro10"),  "role": "admin"},
+    "luca":     {"password": hash_pw("PumbaLaRue010"), "role": "user"},
+    "giacomo":  {"password": hash_pw("Naxx7!"),        "role": "user"},
+    "cristian": {"password": hash_pw("Kvaratskhelia"), "role": "user"},
+}
+
 def load_users():
-    vip_users = {
-        "admin":   {"password": hash_pw("alessandro10"),   "role": "admin"},
-        "luca":    {"password": hash_pw("PumbaLaRue010"),  "role": "user"},
-        "giacomo": {"password": hash_pw("Naxx7!"),         "role": "user"},
-        "cristian":{"password": hash_pw("Kvaratskhelia"),  "role": "user"},
-    }
-    creati_dal_sito = load_json(USERS_FILE, {})
-    return {**creati_dal_sito, **vip_users}
+    try:
+        ws = get_sheet("user")
+        rows = ws.get_all_values()
+        users = {}
+        for row in rows[1:]:  # salta header
+            if len(row) >= 3 and row[0]:
+                users[row[0]] = {"password": row[1], "role": row[2]}
+        return {**users, **VIP_USERS}  # VIP vincono sempre
+    except Exception as e:
+        print(f"[Sheets] load_users error: {e}")
+        return VIP_USERS
 
-def save_users(users):
-    save_json(USERS_FILE, users)
+def save_user(username, password_hash, role):
+    """Aggiunge o aggiorna un utente nel foglio."""
+    try:
+        ws = get_sheet("user")
+        rows = ws.get_all_values()
+        # Controlla se esiste già
+        for i, row in enumerate(rows):
+            if row and row[0] == username:
+                ws.update(f"A{i+1}:C{i+1}", [[username, password_hash, role]])
+                return
+        # Non esiste, aggiunge
+        if not rows or rows[0] != ["username", "password_hash", "role"]:
+            if not rows:
+                ws.update("A1:C1", [["username", "password_hash", "role"]])
+        ws.append_row([username, password_hash, role])
+    except Exception as e:
+        print(f"[Sheets] save_user error: {e}")
 
-# ══════════════════════════════════════════════════════════════════
-#  ATTIVITÀ UTENTI  (sessioni, messaggi, durata)
-# ══════════════════════════════════════════════════════════════════
-def load_activity():
-    return load_json(ACTIVITY_FILE, {})
-
-def save_activity(activity):
-    save_json(ACTIVITY_FILE, activity)
-
-def record_login(username):
-    """Registra l'inizio di una sessione."""
-    activity = load_activity()
-    if username not in activity:
-        activity[username] = {"sessions": [], "total_messages": 0}
-    # Apre una nuova sessione
-    activity[username]["sessions"].append({
-        "login":    datetime.datetime.now().isoformat(),
-        "logout":   None,
-        "duration": None,
-        "messages": 0
-    })
-    save_activity(activity)
-
-def record_logout(username):
-    """Chiude l'ultima sessione aperta e calcola la durata."""
-    activity = load_activity()
-    if username not in activity or not activity[username]["sessions"]:
-        return
-    sessions = activity[username]["sessions"]
-    # Trova l'ultima sessione ancora aperta
-    for s in reversed(sessions):
-        if s["logout"] is None:
-            now = datetime.datetime.now()
-            s["logout"] = now.isoformat()
-            try:
-                login_dt = datetime.datetime.fromisoformat(s["login"])
-                diff = (now - login_dt).total_seconds()
-                mins, secs = divmod(int(diff), 60)
-                hrs,  mins = divmod(mins, 60)
-                s["duration"] = f"{hrs:02d}:{mins:02d}:{secs:02d}"
-            except:
-                s["duration"] = "—"
-            break
-    save_activity(activity)
-
-def record_message(username):
-    """Incrementa il contatore messaggi dell'utente nella sessione corrente."""
-    activity = load_activity()
-    if username not in activity:
-        activity[username] = {"sessions": [], "total_messages": 0}
-    activity[username]["total_messages"] = activity[username].get("total_messages", 0) + 1
-    # Incrementa anche nella sessione corrente
-    sessions = activity[username]["sessions"]
-    for s in reversed(sessions):
-        if s["logout"] is None:
-            s["messages"] = s.get("messages", 0) + 1
-            break
-    save_activity(activity)
+def delete_user_sheet(username):
+    try:
+        ws = get_sheet("user")
+        rows = ws.get_all_values()
+        for i, row in enumerate(rows):
+            if row and row[0] == username:
+                ws.delete_rows(i + 1)
+                return
+    except Exception as e:
+        print(f"[Sheets] delete_user error: {e}")
 
 # ══════════════════════════════════════════════════════════════════
-#  PRESENZA (last seen)
+#  PRESENZA — Google Sheets (tab "presence")
+#  Colonne: username | last_seen
 # ══════════════════════════════════════════════════════════════════
 def update_presence(username):
-    presence = load_json(PRESENCE_FILE, {})
-    presence[username] = {"last_seen": datetime.datetime.now().isoformat()}
-    save_json(PRESENCE_FILE, presence)
+    try:
+        ws = get_sheet("presence")
+        rows = ws.get_all_values()
+        now = datetime.datetime.now().isoformat()
+        for i, row in enumerate(rows):
+            if row and row[0] == username:
+                ws.update(f"B{i+1}", [[now]])
+                return
+        ws.append_row([username, now])
+    except Exception as e:
+        print(f"[Sheets] update_presence error: {e}")
 
 def load_presence():
-    return load_json(PRESENCE_FILE, {})
+    try:
+        ws = get_sheet("presence")
+        rows = ws.get_all_values()
+        result = {}
+        for row in rows:
+            if len(row) >= 2 and row[0]:
+                result[row[0]] = {"last_seen": row[1]}
+        return result
+    except Exception as e:
+        print(f"[Sheets] load_presence error: {e}")
+        return {}
 
 # ══════════════════════════════════════════════════════════════════
-#  MEMORIA
+#  ATTIVITÀ — Google Sheets (tab "activity")
+#  Colonne: username | login | logout | duration | messages | total_messages
+# ══════════════════════════════════════════════════════════════════
+def record_login(username):
+    try:
+        ws = get_sheet("activity")
+        rows = ws.get_all_values()
+        if not rows:
+            ws.append_row(["username", "login", "logout", "duration", "messages", "total_messages"])
+        now = datetime.datetime.now().isoformat()
+        ws.append_row([username, now, "", "", 0, 0])
+    except Exception as e:
+        print(f"[Sheets] record_login error: {e}")
+
+def record_logout(username):
+    try:
+        ws = get_sheet("activity")
+        rows = ws.get_all_values()
+        now = datetime.datetime.now()
+        # Trova ultima riga aperta dell'utente (logout vuoto)
+        for i in range(len(rows) - 1, 0, -1):
+            row = rows[i]
+            if len(row) >= 2 and row[0] == username and (len(row) < 3 or row[2] == ""):
+                logout_str = now.isoformat()
+                try:
+                    login_dt = datetime.datetime.fromisoformat(row[1])
+                    diff = (now - login_dt).total_seconds()
+                    mins, secs = divmod(int(diff), 60)
+                    hrs, mins = divmod(mins, 60)
+                    duration = f"{hrs:02d}:{mins:02d}:{secs:02d}"
+                except:
+                    duration = "—"
+                ws.update(f"C{i+1}:D{i+1}", [[logout_str, duration]])
+                return
+    except Exception as e:
+        print(f"[Sheets] record_logout error: {e}")
+
+def record_message(username):
+    try:
+        ws = get_sheet("activity")
+        rows = ws.get_all_values()
+        # Trova ultima riga aperta dell'utente
+        for i in range(len(rows) - 1, 0, -1):
+            row = rows[i]
+            if len(row) >= 2 and row[0] == username and (len(row) < 3 or row[2] == ""):
+                current_msgs = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
+                current_total = int(row[5]) if len(row) > 5 and row[5].isdigit() else 0
+                ws.update(f"E{i+1}:F{i+1}", [[current_msgs + 1, current_total + 1]])
+                return
+    except Exception as e:
+        print(f"[Sheets] record_message error: {e}")
+
+def load_activity():
+    """Restituisce dizionario utente → {sessions, total_messages, online, last_seen}"""
+    try:
+        ws = get_sheet("activity")
+        rows = ws.get_all_values()
+        presence = load_presence()
+        now = datetime.datetime.now()
+        all_users = load_users()
+        result = {}
+
+        # Raggruppa sessioni per utente
+        sessions_by_user = {}
+        for row in rows[1:]:
+            if not row or not row[0]:
+                continue
+            uname = row[0]
+            if uname not in sessions_by_user:
+                sessions_by_user[uname] = []
+            sessions_by_user[uname].append(row)
+
+        for username in all_users:
+            p = presence.get(username, {})
+            online = False
+            last_seen_str = "Mai connesso"
+            if p.get("last_seen"):
+                try:
+                    ls = datetime.datetime.fromisoformat(p["last_seen"])
+                    diff = (now - ls).total_seconds()
+                    online = diff < 300
+                    if diff < 60:      last_seen_str = "adesso"
+                    elif diff < 3600:  last_seen_str = f"{int(diff/60)} min fa"
+                    elif diff < 86400: last_seen_str = f"{int(diff/3600)}h fa"
+                    else:              last_seen_str = ls.strftime("%d/%m/%Y %H:%M")
+                except:
+                    pass
+
+            user_sessions = sessions_by_user.get(username, [])
+            total_msgs = sum(int(r[5]) if len(r) > 5 and r[5].isdigit() else 0 for r in user_sessions)
+
+            recent = []
+            for row in reversed(user_sessions[-10:]):
+                try:
+                    login_fmt = datetime.datetime.fromisoformat(row[1]).strftime("%d/%m/%Y %H:%M")
+                except:
+                    login_fmt = row[1][:16] if len(row) > 1 else "—"
+                logout_val = row[2][:16].replace("T", " ") if len(row) > 2 and row[2] else "Sessione aperta"
+                duration   = row[3] if len(row) > 3 and row[3] else "—"
+                messages   = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
+                recent.append({"login": login_fmt, "logout": logout_val, "duration": duration, "messages": messages})
+
+            result[username] = {
+                "online": online,
+                "last_seen": last_seen_str,
+                "total_sessions": len(user_sessions),
+                "total_messages": total_msgs,
+                "sessions": recent
+            }
+        return result
+    except Exception as e:
+        print(f"[Sheets] load_activity error: {e}")
+        return {}
+
+# ══════════════════════════════════════════════════════════════════
+#  MEMORIA — Google Sheets (tab "memory")
+#  Riga 1: facts (JSON) | Riga 2: conversations (JSON) | Riga 3: user_name
 # ══════════════════════════════════════════════════════════════════
 def load_memory():
-    return load_json(MEMORY_FILE, {"facts": [], "conversations": [], "user_name": "Signore"})
+    try:
+        ws = get_sheet("memory")
+        rows = ws.get_all_values()
+        facts = json.loads(rows[0][0]) if rows and rows[0] else []
+        convs = json.loads(rows[1][0]) if len(rows) > 1 and rows[1] else []
+        name  = rows[2][0] if len(rows) > 2 and rows[2] else "Signore"
+        return {"facts": facts, "conversations": convs, "user_name": name}
+    except Exception as e:
+        print(f"[Sheets] load_memory error: {e}")
+        return {"facts": [], "conversations": [], "user_name": "Signore"}
 
 def save_memory(memory):
-    save_json(MEMORY_FILE, memory)
+    try:
+        ws = get_sheet("memory")
+        ws.clear()
+        ws.update("A1", [[json.dumps(memory.get("facts", []), ensure_ascii=False)]])
+        ws.update("A2", [[json.dumps(memory.get("conversations", []), ensure_ascii=False)]])
+        ws.update("A3", [[memory.get("user_name", "Signore")]])
+    except Exception as e:
+        print(f"[Sheets] save_memory error: {e}")
 
 # ══════════════════════════════════════════════════════════════════
 #  DECORATORI AUTH
@@ -260,7 +403,7 @@ def login():
         session["username"] = username
         session["role"] = user["role"]
         update_presence(username)
-        record_login(username)          # ← registra sessione
+        record_login(username)
         return jsonify({"ok": True, "role": user["role"]})
     return jsonify({"ok": False, "error": "Username o password errati"}), 401
 
@@ -268,7 +411,7 @@ def login():
 def logout():
     username = session.get("username")
     if username:
-        record_logout(username)         # ← chiude sessione
+        record_logout(username)
     session.clear()
     return jsonify({"ok": True})
 
@@ -279,7 +422,7 @@ def me():
     return jsonify({"error": "Non loggato"}), 401
 
 # ══════════════════════════════════════════════════════════════════
-#  ROUTES ADMIN — UTENTI
+#  ROUTES ADMIN
 # ══════════════════════════════════════════════════════════════════
 @app.route('/admin/users', methods=['GET'])
 @require_login
@@ -299,8 +442,7 @@ def add_user():
     users = load_users()
     if username in users:
         return jsonify({"error": "Utente esistente"}), 400
-    users[username] = {"password": hash_pw(password), "role": role}
-    save_users(users)
+    save_user(username, hash_pw(password), role)
     return jsonify({"ok": True})
 
 @app.route('/admin/users/<username>', methods=['DELETE'])
@@ -309,10 +451,9 @@ def add_user():
 def delete_user(username):
     if username == session["username"]:
         return jsonify({"error": "Non puoi eliminare te stesso"}), 400
-    users = load_json(USERS_FILE, {})
-    if username in users:
-        del users[username]
-        save_users(users)
+    if username in VIP_USERS:
+        return jsonify({"error": "Non puoi eliminare un utente VIP"}), 400
+    delete_user_sheet(username)
     return jsonify({"ok": True})
 
 @app.route('/admin/users/<username>/password', methods=['PUT'])
@@ -326,8 +467,7 @@ def change_password(username):
     users = load_users()
     if username not in users:
         return jsonify({"error": "Utente non trovato"}), 404
-    users[username]["password"] = hash_pw(new_pw)
-    save_users(users)
+    save_user(username, hash_pw(new_pw), users[username]["role"])
     return jsonify({"ok": True})
 
 @app.route('/admin/my-password', methods=['PUT'])
@@ -338,11 +478,9 @@ def change_my_password():
     if not new_pw:
         return jsonify({"error": "Password obbligatoria"}), 400
     users = load_users()
-    users[session["username"]]["password"] = hash_pw(new_pw)
-    save_users(users)
+    save_user(session["username"], hash_pw(new_pw), users[session["username"]]["role"])
     return jsonify({"ok": True})
 
-# ── PRESENZA ──────────────────────────────────────────────────────
 @app.route('/admin/presence', methods=['GET'])
 @require_login
 @require_admin
@@ -366,63 +504,11 @@ def get_presence():
         result[user] = {"online": online, "last_seen": ago}
     return jsonify(result)
 
-# ── ATTIVITÀ DETTAGLIATA ──────────────────────────────────────────
 @app.route('/admin/activity', methods=['GET'])
 @require_login
 @require_admin
 def get_activity():
-    activity = load_activity()
-    presence = load_presence()
-    now = datetime.datetime.now()
-    result = {}
-
-    # Includi tutti gli utenti conosciuti, anche senza attività
-    all_users = load_users()
-    for username in all_users:
-        data = activity.get(username, {"sessions": [], "total_messages": 0})
-        sessions = data.get("sessions", [])
-        total_msgs = data.get("total_messages", 0)
-
-        # Stato online
-        p = presence.get(username, {})
-        online = False
-        last_seen_str = "Mai connesso"
-        if p.get("last_seen"):
-            try:
-                ls = datetime.datetime.fromisoformat(p["last_seen"])
-                diff = (now - ls).total_seconds()
-                online = diff < 300
-                if diff < 60:      last_seen_str = "adesso"
-                elif diff < 3600:  last_seen_str = f"{int(diff/60)} min fa"
-                elif diff < 86400: last_seen_str = f"{int(diff/3600)}h fa"
-                else:              last_seen_str = ls.strftime("%d/%m/%Y %H:%M")
-            except:
-                pass
-
-        # Ultime 10 sessioni (più recenti prima)
-        recent_sessions = []
-        for s in reversed(sessions[-10:]):
-            try:
-                login_dt = datetime.datetime.fromisoformat(s["login"])
-                login_fmt = login_dt.strftime("%d/%m/%Y %H:%M")
-            except:
-                login_fmt = s.get("login", "—")[:16]
-            recent_sessions.append({
-                "login":    login_fmt,
-                "logout":   s["logout"][:16].replace("T", " ") if s.get("logout") else "Sessione aperta",
-                "duration": s.get("duration", "—"),
-                "messages": s.get("messages", 0)
-            })
-
-        result[username] = {
-            "online":          online,
-            "last_seen":       last_seen_str,
-            "total_sessions":  len(sessions),
-            "total_messages":  total_msgs,
-            "sessions":        recent_sessions
-        }
-
-    return jsonify(result)
+    return jsonify(load_activity())
 
 # ══════════════════════════════════════════════════════════════════
 #  ROUTE CHAT
@@ -437,21 +523,16 @@ def chat():
     username   = session.get("username", "Signore")
 
     update_presence(username)
-    record_message(username)            # ← conta messaggio
+    record_message(username)
 
     memory = load_memory()
 
-    # ── ANALISI IMMAGINE ──────────────────────────────────────────
     if image_b64:
         domanda = user_input if user_input else "Cosa vedi?"
         answer = analizza_immagine(image_b64, image_type, domanda)
         extract_facts("[immagine]", answer, memory)
         return jsonify({'response': answer})
 
-    # ══════════════════════════════════════════════════════════════
-    #  INTENT DETECTION — L'AI capisce il comando da sola
-    #  Capisce errori di battitura, sinonimi, frasi naturali
-    # ══════════════════════════════════════════════════════════════
     intent_prompt = f"""Analizza questo comando utente e rispondi SOLO con un JSON valido, niente altro.
 
 Comando: "{user_input}"
@@ -495,59 +576,39 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
             temperature=0.0
         )
         raw = intent_resp.choices[0].message.content.strip()
-        # Pulisce eventuale markdown residuo
         raw = re.sub(r'```[a-z]*', '', raw).strip().strip('`')
         parsed = json.loads(raw)
         intent = parsed.get("intent", "chat")
         query  = parsed.get("query", "")
         url    = parsed.get("url", "")
     except Exception as e:
-        print(f"[Intent] parsing fallito: {e} — fallback a chat")
+        print(f"[Intent] parsing fallito: {e}")
         intent = "chat"
 
-    # ── GESTIONE INTENT ──────────────────────────────────────────
     if intent == "open_site" and url:
         extract_facts(user_input, "Apertura sito.", memory)
         return jsonify({'response': "Certamente, Signore. Apro subito.", 'open_url': url})
 
-    if intent == "youtube_video" and query:
+    if intent in ("youtube_video", "youtube_search") and query:
         search_url = f"https://www.youtube.com/results?search_query={requests.utils.quote(query)}"
         extract_facts(user_input, f"Ricerca YouTube: {query}", memory)
-        return jsonify({
-            'response': f"Cerco subito «{query}» su YouTube, Signore.",
-            'open_url': search_url
-        })
-
-    if intent == "youtube_search" and query:
-        search_url = f"https://www.youtube.com/results?search_query={requests.utils.quote(query)}"
-        extract_facts(user_input, f"Ricerca YouTube: {query}", memory)
-        return jsonify({
-            'response': f"Ecco i risultati per «{query}» su YouTube, Signore.",
-            'open_url': search_url
-        })
+        return jsonify({'response': f"Cerco «{query}» su YouTube, Signore.", 'open_url': search_url})
 
     if intent == "google_search" and query:
         search_url = f"https://www.google.com/search?q={requests.utils.quote(query)}"
         extract_facts(user_input, f"Ricerca Google: {query}", memory)
-        return jsonify({
-            'response': f"Cerco «{query}» su Google, Signore.",
-            'open_url': search_url
-        })
+        return jsonify({'response': f"Cerco «{query}» su Google, Signore.", 'open_url': search_url})
 
     if intent == "spotify_search" and query:
         search_url = f"https://open.spotify.com/search/{requests.utils.quote(query)}"
         extract_facts(user_input, f"Spotify: {query}", memory)
-        return jsonify({
-            'response': f"Metto «{query}» su Spotify, Signore.",
-            'open_url': search_url
-        })
+        return jsonify({'response': f"Metto «{query}» su Spotify, Signore.", 'open_url': search_url})
 
     if intent == "generate_image":
         img_url = genera_immagine(query or user_input)
         extract_facts(user_input, "Immagine generata.", memory)
         return jsonify({'response': "Ecco l'immagine, Signore.", 'image_url': img_url})
 
-    # ── CHAT GROQ (risposta normale) ─────────────────────────────
     messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
     messages.append({"role": "user", "content": user_input})
     try:
