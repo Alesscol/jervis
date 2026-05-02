@@ -74,7 +74,6 @@ def init_vip_users():
         ws = get_sheet("user")
         rows = ws.get_all_values()
         existing = {r[0] for r in rows if r}
-        # Aggiunge header se manca
         if not rows:
             ws.append_row(["username", "password_hash", "role"])
         for username, data in VIP_USERS.items():
@@ -84,14 +83,15 @@ def init_vip_users():
     except Exception as e:
         print(f"[Sheets] init_vip_users error: {e}")
 
+def load_users():
     try:
         ws = get_sheet("user")
         rows = ws.get_all_values()
         users = {}
-        for row in rows:  # legge tutto, salta solo righe con header
+        for row in rows:
             if len(row) >= 3 and row[0] and row[0] != "username":
                 users[row[0]] = {"password": row[1], "role": row[2]}
-        return {**users, **VIP_USERS}  # VIP vincono sempre
+        return {**users, **VIP_USERS}
     except Exception as e:
         print(f"[Sheets] load_users error: {e}")
         return VIP_USERS
