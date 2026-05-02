@@ -412,6 +412,54 @@
         .mem-btn:hover { border-color: var(--arc); color: var(--arc); }
         .mem-btn.danger:hover { border-color: var(--red); color: var(--red); }
 
+        /* ── ACTIVITY PANEL ── */
+        .activity-user-card {
+            border: 1px solid rgba(0,229,255,0.12);
+            background: rgba(0,15,30,0.6);
+            margin-bottom: 14px;
+            padding: 12px 14px;
+        }
+        .activity-user-header {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 8px; cursor: pointer;
+        }
+        .activity-username {
+            font-family: 'Orbitron', monospace;
+            font-size: 11px; letter-spacing: 2px;
+            flex: 1; color: var(--arc);
+        }
+        .activity-stats {
+            display: flex; gap: 18px; margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+        .activity-stat {
+            font-size: 10px; color: rgba(255,255,255,0.5);
+            display: flex; flex-direction: column; gap: 2px;
+        }
+        .activity-stat span { color: var(--arc); font-size: 13px; font-weight: bold; }
+        .sessions-table {
+            width: 100%; border-collapse: collapse;
+            font-size: 10px; margin-top: 8px;
+        }
+        .sessions-table th {
+            color: var(--text-dim); letter-spacing: 1px;
+            padding: 4px 6px; text-align: left;
+            border-bottom: 1px solid rgba(0,229,255,0.1);
+            font-weight: normal;
+        }
+        .sessions-table td {
+            padding: 5px 6px; color: rgba(255,255,255,0.65);
+            border-bottom: 1px solid rgba(0,229,255,0.05);
+        }
+        .sessions-table tr:last-child td { border-bottom: none; }
+        .toggle-sessions {
+            font-size: 9px; letter-spacing: 1px;
+            color: var(--text-dim); cursor: pointer;
+            background: none; border: none; padding: 0;
+            font-family: inherit;
+        }
+        .toggle-sessions:hover { color: var(--arc); }
+
         /* Overlay */
         .overlay {
             position: fixed; inset: 0;
@@ -446,6 +494,7 @@
             </div>
             <div class="header-right">
                 <button class="memory-btn" onclick="openMemory()">⬡ MEMORIA</button>
+                <button class="memory-btn" id="activityBtn" onclick="openActivity()" style="display:none">📊 ATTIVITÀ</button>
                 <button class="memory-btn" id="adminBtn" onclick="openAdmin()" style="display:none">⚙ ADMIN</button>
                 <button class="memory-btn" onclick="doLogout()">⏻ ESCI</button>
                 <div class="status-panel">
@@ -478,6 +527,7 @@
                 <button class="btn-voice" id="uploadBtn" title="Carica immagine" onclick="document.getElementById('fileInput').click()">📎</button>
                 <input type="file" id="fileInput" accept="image/*" style="display:none">
                 <button class="btn-voice" id="voiceBtn" title="Microfono">🎙</button>
+                <button class="btn-voice" id="stopBtn" title="Ferma voce" onclick="stopAudio()" style="display:none;border-color:rgba(255,68,68,0.5);color:rgba(255,68,68,0.8)">⏹</button>
                 <button class="btn-send" onclick="sendManual()">ESEGUI</button>
             </div>
             <div class="input-meta">
@@ -538,6 +588,18 @@
         <div id="admin-msg" style="font-size:10px;letter-spacing:2px;color:var(--green);min-height:16px;margin-bottom:12px"></div>
         <div class="memory-actions">
             <button class="mem-btn" onclick="closeAll()">CHIUDI</button>
+        </div>
+    </div>
+
+    <!-- ACTIVITY PANEL -->
+    <div class="memory-panel" id="activityPanel" style="min-width:520px;max-width:700px;max-height:80vh;overflow-y:auto">
+        <h2>📊 MONITOR ATTIVITÀ OPERATORI</h2>
+        <div id="activity-content">
+            <div class="memory-item" style="opacity:0.4">Caricamento dati...</div>
+        </div>
+        <div class="memory-actions" style="margin-top:18px">
+            <button class="mem-btn" onclick="closeAll()">CHIUDI</button>
+            <button class="mem-btn" onclick="openActivity()">↺ AGGIORNA</button>
         </div>
     </div>
 
@@ -673,8 +735,19 @@
                 if (conversationHistory.length > 20) conversationHistory.shift();
 
                 if (data.audio_url) {
-                    const audio = new Audio(data.audio_url);
-                    audio.play().catch(() => {});
+                    if (window._jervisAudio) {
+                        window._jervisAudio.pause();
+                        window._jervisAudio.currentTime = 0;
+                    }
+                    window._jervisAudio = new Audio(data.audio_url);
+                    window._jervisAudio.play().catch(() => {});
+                    const stopBtn = document.getElementById('stopBtn');
+                    stopBtn.style.display = 'flex';
+                    window._jervisAudio.onended = () => { stopBtn.style.display = 'none'; };
+                }
+
+                if (data.open_url) {
+                    window.open(data.open_url, '_blank');
                 }
 
                 if (data.tapo) {
@@ -686,6 +759,14 @@
             } finally {
                 isWaiting = false;
             }
+        }
+
+        function stopAudio() {
+            if (window._jervisAudio) {
+                window._jervisAudio.pause();
+                window._jervisAudio.currentTime = 0;
+            }
+            document.getElementById('stopBtn').style.display = 'none';
         }
 
         function sendManual() {
@@ -744,8 +825,8 @@
                 const data = await res.json();
                 if (data.role === 'admin') {
                     document.getElementById('adminBtn').style.display = 'inline-block';
+                    document.getElementById('activityBtn').style.display = 'inline-block';
                 }
-                // Show username in header
                 const statusSub = document.querySelector('.status-sub');
                 if (statusSub) statusSub.textContent = `OPERATORE: ${data.username.toUpperCase()}`;
             } catch(e) {}
@@ -759,7 +840,76 @@
         function closeAll() {
             document.getElementById('memoryPanel').classList.remove('open');
             document.getElementById('adminPanel').classList.remove('open');
+            document.getElementById('activityPanel').classList.remove('open');
             document.getElementById('overlay').classList.remove('open');
+        }
+
+        async function openActivity() {
+            document.getElementById('activityPanel').classList.add('open');
+            document.getElementById('overlay').classList.add('open');
+            const content = document.getElementById('activity-content');
+            content.innerHTML = '<div class="memory-item" style="opacity:0.4">Caricamento dati...</div>';
+            try {
+                const res = await fetch('/admin/activity');
+                const data = await res.json();
+                if (!Object.keys(data).length) {
+                    content.innerHTML = '<div class="memory-item" style="opacity:0.4">Nessuna attività registrata.</div>';
+                    return;
+                }
+                // Ordina: online prima, poi per ultimo accesso
+                const sorted = Object.entries(data).sort((a, b) => {
+                    if (a[1].online !== b[1].online) return b[1].online - a[1].online;
+                    return b[1].total_messages - a[1].total_messages;
+                });
+                content.innerHTML = sorted.map(([username, info]) => {
+                    const onlineDot = info.online
+                        ? `<span style="width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);display:inline-block;flex-shrink:0"></span>`
+                        : `<span style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.15);display:inline-block;flex-shrink:0"></span>`;
+
+                    const sessionsHtml = info.sessions.length ? `
+                        <table class="sessions-table">
+                            <tr>
+                                <th>LOGIN</th>
+                                <th>LOGOUT</th>
+                                <th>DURATA</th>
+                                <th>MSG</th>
+                            </tr>
+                            ${info.sessions.map(s => `
+                                <tr>
+                                    <td>${s.login}</td>
+                                    <td>${s.logout}</td>
+                                    <td style="color:var(--arc)">${s.duration}</td>
+                                    <td style="color:var(--gold)">${s.messages}</td>
+                                </tr>
+                            `).join('')}
+                        </table>` : '<div style="font-size:10px;opacity:0.4;padding:4px 0">Nessuna sessione registrata.</div>';
+
+                    const uid = 'act_' + username;
+                    return `
+                    <div class="activity-user-card">
+                        <div class="activity-user-header" onclick="document.getElementById('${uid}').style.display = document.getElementById('${uid}').style.display === 'none' ? 'block' : 'none'">
+                            ${onlineDot}
+                            <span class="activity-username">${username.toUpperCase()}</span>
+                            <span style="font-size:9px;color:${info.online ? 'var(--green)' : 'var(--text-dim)'}">
+                                ${info.online ? '● ONLINE' : info.last_seen}
+                            </span>
+                        </div>
+                        <div class="activity-stats">
+                            <div class="activity-stat">SESSIONI TOTALI<span>${info.total_sessions}</span></div>
+                            <div class="activity-stat">MESSAGGI TOTALI<span>${info.total_messages}</span></div>
+                            <div class="activity-stat">ULTIMO ACCESSO<span style="font-size:10px">${info.last_seen}</span></div>
+                        </div>
+                        <button class="toggle-sessions" onclick="const el=document.getElementById('${uid}');el.style.display=el.style.display==='none'?'block':'none'">
+                            ▼ STORICO SESSIONI (ultime ${info.sessions.length})
+                        </button>
+                        <div id="${uid}" style="display:none;margin-top:8px">
+                            ${sessionsHtml}
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch(e) {
+                content.innerHTML = '<div class="memory-item" style="color:var(--red)">Errore caricamento dati.</div>';
+            }
         }
 
         async function openMemory() {
