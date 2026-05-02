@@ -149,9 +149,9 @@ def record_login(username):
         ws = get_sheet("activity")
         rows = ws.get_all_values()
         if not rows:
-            ws.append_row(["username", "login", "logout", "duration", "messages", "total_messages"])
+            ws.append_row(["username", "login", "logout", "duration", "messages"])
         now = datetime.datetime.now().isoformat()
-        ws.append_row([username, now, "", "", 0, 0])
+        ws.append_row([username, now, "", "", "0"])
     except Exception as e:
         print(f"[Sheets] record_login error: {e}")
 
@@ -160,7 +160,6 @@ def record_logout(username):
         ws = get_sheet("activity")
         rows = ws.get_all_values()
         now = datetime.datetime.now()
-        # Trova ultima riga aperta dell'utente (logout vuoto)
         for i in range(len(rows) - 1, 0, -1):
             row = rows[i]
             if len(row) >= 2 and row[0] == username and (len(row) < 3 or row[2] == ""):
@@ -182,13 +181,11 @@ def record_message(username):
     try:
         ws = get_sheet("activity")
         rows = ws.get_all_values()
-        # Trova ultima riga aperta dell'utente
         for i in range(len(rows) - 1, 0, -1):
             row = rows[i]
             if len(row) >= 2 and row[0] == username and (len(row) < 3 or row[2] == ""):
                 current_msgs = int(row[4]) if len(row) > 4 and row[4].isdigit() else 0
-                current_total = int(row[5]) if len(row) > 5 and row[5].isdigit() else 0
-                ws.update(f"E{i+1}:F{i+1}", [[current_msgs + 1, current_total + 1]])
+                ws.update(f"E{i+1}", [[str(current_msgs + 1)]])
                 return
     except Exception as e:
         print(f"[Sheets] record_message error: {e}")
@@ -247,7 +244,7 @@ def load_activity():
                 "online": online,
                 "last_seen": last_seen_str,
                 "total_sessions": len(user_sessions),
-                "total_messages": total_msgs,
+                "total_messages": sum(int(r[4]) if len(r) > 4 and r[4].isdigit() else 0 for r in user_sessions),
                 "sessions": recent
             }
         return result
