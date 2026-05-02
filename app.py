@@ -6,6 +6,7 @@ import datetime
 import requests
 import hashlib
 import re
+import base64
 import gspread
 from google.oauth2.service_account import Credentials
 from flask import Flask, render_template, request, jsonify, session
@@ -553,6 +554,8 @@ def chat():
     user_input = data.get('msg', '').strip()
     image_b64  = data.get('image_b64', None)
     image_type = data.get('image_type', 'image/jpeg')
+    file_type  = data.get('file_type', 'image')
+    file_name  = data.get('file_name', 'file')
     username   = session.get("username", "Signore")
 
     update_presence(username)
@@ -561,10 +564,44 @@ def chat():
     memory = load_memory()
 
     if image_b64:
-        domanda = user_input if user_input else "Cosa vedi?"
-        answer = analizza_immagine(image_b64, image_type, domanda)
-        extract_facts("[immagine]", answer, memory)
-        return jsonify({'response': answer})
+        domanda = user_input if user_input else "Descrivi questo file in dettaglio."
+
+        if file_type == 'text':
+            # File di testo — decodifica e manda come contesto
+            try:
+                text_content = base64.b64decode(image_b64).decode('utf-8')
+                text_content = text_content[:8000]  # limite
+                messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
+                messages.append({"role": "user", "content": f"Ho caricato il file '{file_name}':\n\n{text_content}\n\n{domanda}"})
+                response = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=messages, max_tokens=500)
+                answer = response.choices[0].message.content.strip()
+            except Exception as e:
+                answer = f"Non riesco a leggere il file: {e}"
+            extract_facts(user_input or f"[file: {file_name}]", answer, memory)
+            return jsonify({'response': answer})
+
+        elif file_type == 'pdf':
+            # PDF — estrai testo con pdfplumber
+            try:
+                import pdfplumber, io, base64 as b64lib
+                pdf_bytes = b64lib.b64decode(image_b64)
+                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                    text_content = "\n".join(page.extract_text() or "" for page in pdf.pages[:10])
+                text_content = text_content[:8000]
+                messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
+                messages.append({"role": "user", "content": f"Ho caricato il PDF '{file_name}':\n\n{text_content}\n\n{domanda}"})
+                response = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=messages, max_tokens=500)
+                answer = response.choices[0].message.content.strip()
+            except Exception as e:
+                answer = f"Non riesco a leggere il PDF: {e}"
+            extract_facts(user_input or f"[pdf: {file_name}]", answer, memory)
+            return jsonify({'response': answer})
+
+        else:
+            # Immagine
+            answer = analizza_immagine(image_b64, image_type, domanda)
+            extract_facts("[immagine]", answer, memory)
+            return jsonify({'response': answer})
 
     intent_prompt = f"""Analizza questo comando utente e rispondi SOLO con un JSON valido, niente altro.
 
