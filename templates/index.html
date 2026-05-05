@@ -605,492 +605,233 @@
     </div>
 
     <script>
-        // ── PARTICELLE ──
-        (function() {
-            const container = document.getElementById('particles');
-            for (let i = 0; i < 18; i++) {
-                const p = document.createElement('div');
-                p.className = 'particle';
-                p.style.left = Math.random() * 100 + 'vw';
-                p.style.animationDuration = (8 + Math.random() * 15) + 's';
-                p.style.animationDelay = (Math.random() * 10) + 's';
-                p.style.opacity = Math.random() * 0.5;
-                container.appendChild(p);
-            }
-        })();
+        // ── CONFIGURAZIONE E STATO DEL SISTEMA ──
+let conversationHistory = [];
+let isWaiting = false;
+let pendingImage = null;
+let imageModeActive = false; // Gestisce il tasto 🎨
+let currentAudio = null;     // Gestisce il tasto 🎙/⏹
 
-        // ── STATO ──
-        let conversationHistory = [];
-        let isWaiting = false;
-        let pendingImage = null;
+const chatBox = document.getElementById('chat-box');
+const userInput = document.getElementById('userInput');
 
-        const chatBox = document.getElementById('chat-box');
-        const userInput = document.getElementById('userInput');
+// ── INIZIALIZZAZIONE ALL'AVVIO ──
+window.onload = async function() {
+    console.log("J.E.R.V.I.S. - Inizializzazione protocolli di sicurezza...");
+    await checkAccess(); // Controlla se mostrare i tasti Admin
+    initParticles();     // Avvia le particelle estetiche
+};
 
-        userInput.addEventListener('keypress', e => {
-            if (e.key === 'Enter') { e.preventDefault(); sendManual(); }
+// ── CONTROLLO ACCESSO ADMIN ──
+async function checkAccess() {
+    try {
+        const res = await fetch('/get_user_info');
+        const data = await res.json();
+        if (data.role === 'admin') {
+            document.getElementById('adminBtn').style.display = 'inline-block';
+            document.getElementById('activityBtn').style.display = 'inline-block';
+            console.log("Privilegi di Amministratore confermati.");
+        }
+    } catch (err) {
+        console.error("Errore verifica permessi.");
+    }
+}
+
+// ── GESTIONE MODALITÀ IMMAGINI ──
+function toggleImageMode() {
+    imageModeActive = !imageModeActive;
+    const btn = document.getElementById('imgModeBtn');
+    if (imageModeActive) {
+        btn.style.borderColor = "var(--green)";
+        btn.style.color = "var(--green)";
+        btn.style.boxShadow = "0 0 10px rgba(0, 255, 136, 0.4)";
+        btn.title = "Modalità immagini ON";
+    } else {
+        btn.style.borderColor = "var(--border)";
+        btn.style.color = "var(--text-dim)";
+        btn.style.boxShadow = "none";
+        btn.title = "Modalità immagini OFF";
+    }
+}
+
+// ── GESTIONE AUDIO ──
+function stopAudio() {
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+        document.getElementById('stopBtn').style.display = 'none';
+    }
+}
+
+// ── INVIO MESSAGGI ──
+async function sendManual() {
+    const text = userInput.value;
+    userInput.value = '';
+    await sendMsg(text);
+}
+
+async function sendMsg(text) {
+    if (!text.trim() && !pendingImage) return;
+    if (isWaiting) return;
+    isWaiting = true;
+
+    const imgPreview = pendingImage ? pendingImage.dataUrl : null;
+    addMessage('user', text || `📎 ${pendingImage?.name || 'File allegato'}`, imgPreview);
+
+    const payload = { 
+        msg: text, 
+        history: conversationHistory, 
+        image_mode: imageModeActive 
+    };
+
+    if (pendingImage) {
+        payload.image_b64 = pendingImage.b64;
+        payload.image_type = pendingImage.type;
+        payload.file_type = pendingImage.fileType;
+        payload.file_name = pendingImage.name;
+    }
+
+    removeImage();
+    showTyping();
+
+    try {
+        const res = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
 
-        // ── UPLOAD IMMAGINE ──
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            const reader = new FileReader();
+        const data = await res.json();
+        removeTyping();
 
-            if (file.type.startsWith('image/')) {
-                reader.onload = function(ev) {
-                    const dataUrl = ev.target.result;
-                    pendingImage = { b64: dataUrl.split(',')[1], type: file.type, dataUrl, fileType: 'image' };
-                    document.getElementById('img-preview').src = dataUrl;
-                    document.getElementById('img-preview-wrap').style.display = 'flex';
-                };
-                reader.readAsDataURL(file);
-            } else if (file.type === 'application/pdf') {
-                reader.onload = function(ev) {
-                    const b64 = btoa(String.fromCharCode(...new Uint8Array(ev.target.result)));
-                    pendingImage = { b64, type: 'application/pdf', dataUrl: null, fileType: 'pdf', name: file.name };
-                    document.getElementById('img-preview').src = '';
-                    document.getElementById('img-preview-wrap').style.display = 'flex';
-                    document.getElementById('img-preview').style.display = 'none';
-                    document.getElementById('img-preview-wrap').innerHTML = `<div style="color:var(--arc);font-size:11px;padding:8px">📄 ${file.name} <button onclick="removeImage()" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">✕</button></div>`;
-                };
-                reader.readAsArrayBuffer(file);
-            } else {
-                // File di testo
-                reader.onload = function(ev) {
-                    const text = ev.target.result;
-                    pendingImage = { b64: btoa(unescape(encodeURIComponent(text))), type: 'text/plain', dataUrl: null, fileType: 'text', name: file.name };
-                    document.getElementById('img-preview-wrap').style.display = 'flex';
-                    document.getElementById('img-preview-wrap').innerHTML = `<div style="color:var(--arc);font-size:11px;padding:8px">📝 ${file.name} <button onclick="removeImage()" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">✕</button></div>`;
-                };
-                reader.readAsText(file);
-            }
-        });
-
-        function removeImage() {
-            pendingImage = null;
-            document.getElementById('img-preview-wrap').style.display = 'none';
-            document.getElementById('fileInput').value = '';
-        }
-
-        function addMessage(role, text, imgSrc) {
-            const welcome = chatBox.querySelector('.welcome');
-            if (welcome) welcome.remove();
-
-            const wrapper = document.createElement('div');
-            wrapper.className = `msg ${role}`;
-
-            const label = document.createElement('div');
-            label.className = 'msg-label';
-            label.textContent = role === 'user' ? '▶ OPERATORE' : '◆ J.E.R.V.I.S.';
-
-            const bubble = document.createElement('div');
-            bubble.className = 'msg-bubble';
-
-            // Se c'è un'immagine allegata (utente) o generata (jervis)
-            if (imgSrc) {
-                const img = document.createElement('img');
-                img.src = imgSrc;
-                img.style.cssText = 'max-width:100%;max-height:220px;border-radius:2px;margin-bottom:8px;display:block;border:1px solid rgba(0,229,255,0.2)';
-                bubble.appendChild(img);
-            }
-            if (text) {
-                const p = document.createElement('span');
-                p.textContent = text;
-                bubble.appendChild(p);
-            }
-
-            wrapper.appendChild(label);
-            wrapper.appendChild(bubble);
-            chatBox.appendChild(wrapper);
-            chatBox.scrollTop = chatBox.scrollHeight;
-            return wrapper;
-        }
-
-        function showTyping() {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'msg jervis typing';
-            wrapper.id = 'typing-indicator';
-            const label = document.createElement('div');
-            label.className = 'msg-label';
-            label.textContent = '◆ J.E.R.V.I.S.';
-            const bubble = document.createElement('div');
-            bubble.className = 'msg-bubble';
-            bubble.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-            wrapper.appendChild(label);
-            wrapper.appendChild(bubble);
-            chatBox.appendChild(wrapper);
-            chatBox.scrollTop = chatBox.scrollHeight;
-        }
-
-        function removeTyping() {
-            const t = document.getElementById('typing-indicator');
-            if (t) t.remove();
-        }
-
-        async function sendMsg(text) {
-            if (!text.trim() && !pendingImage) return;
-            if (isWaiting) return;
-            isWaiting = true;
-
-            const imgPreview = pendingImage ? pendingImage.dataUrl : null;
-            addMessage('user', text || `📎 ${pendingImage?.name || 'File allegato'}`, imgPreview);
-
-            const payload = { msg: text, history: conversationHistory, image_mode: imageModeActive };
-            if (pendingImage) {
-                payload.image_b64 = pendingImage.b64;
-                payload.image_type = pendingImage.type;
-                payload.file_type = pendingImage.fileType || 'image';
-                payload.file_name = pendingImage.name || '';
-            }
-            removeImage();
-            showTyping();
-
-            try {
-                const res = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await res.json();
-                removeTyping();
-                addMessage('jervis', data.response, data.image_url || null);
-
-                conversationHistory.push({ user: text, jervis: data.response });
-                if (conversationHistory.length > 20) conversationHistory.shift();
-
-                if (data.audio_url) {
-                    if (window._jervisAudio) {
-                        window._jervisAudio.pause();
-                        window._jervisAudio.currentTime = 0;
-                    }
-                    window._jervisAudio = new Audio(data.audio_url);
-                    window._jervisAudio.play().catch(() => {});
-                    const stopBtn = document.getElementById('stopBtn');
-                    stopBtn.style.display = 'flex';
-                    window._jervisAudio.onended = () => { stopBtn.style.display = 'none'; };
-                }
-
-                if (data.open_url) {
-                    window.open(data.open_url, '_blank');
-                }
-
-                if (data.tapo) {
-                    console.log('[TAPO]', data.tapo);
-                }
-            } catch (err) {
-                removeTyping();
-                addMessage('jervis', 'Errore di connessione. Verificare i sistemi.');
-            } finally {
-                isWaiting = false;
+        if (data.response) {
+            addMessage('jervis', data.response, data.image_url);
+            
+            // Gestione della sintesi vocale
+            if (data.audio_url) {
+                if (currentAudio) currentAudio.pause();
+                currentAudio = new Audio(data.audio_url);
+                currentAudio.play();
+                document.getElementById('stopBtn').style.display = 'flex';
+                currentAudio.onended = () => document.getElementById('stopBtn').style.display = 'none';
             }
         }
+    } catch (err) {
+        removeTyping();
+        addMessage('jervis', "Protocollo interrotto. Verificare connessione al server, Signore.");
+    } finally {
+        isWaiting = false;
+    }
+}
 
-        // ── MODALITÀ IMMAGINI ──
-        let imageModeActive = false;
-        function toggleImageMode() {
-            imageModeActive = !imageModeActive;
-            const btn = document.getElementById('imgModeBtn');
-            const input = document.getElementById('userInput');
-            if (imageModeActive) {
-                btn.style.borderColor = 'rgba(255,215,0,0.7)';
-                btn.style.color = 'rgba(255,215,0,0.9)';
-                btn.style.boxShadow = '0 0 10px rgba(255,215,0,0.3)';
-                btn.title = 'Modalità immagini ON';
-                input.placeholder = '🎨 Descrivi l\'immagine da generare...';
-            } else {
-                btn.style.borderColor = '';
-                btn.style.color = '';
-                btn.style.boxShadow = '';
-                btn.title = 'Modalità immagini OFF';
-                input.placeholder = 'Inserisca un comando...';
-            }
-        }
+// ── FUNZIONI UI (CHAT E MESSAGGI) ──
+function addMessage(role, text, imgSrc) {
+    const welcome = chatBox.querySelector('.welcome');
+    if (welcome) welcome.remove();
 
-        function stopAudio() {
-            if (window._jervisAudio) {
-                window._jervisAudio.pause();
-                window._jervisAudio.currentTime = 0;
-            }
-            document.getElementById('stopBtn').style.display = 'none';
-        }
+    const wrapper = document.createElement('div');
+    wrapper.className = `msg ${role}`;
+    const label = document.createElement('div');
+    label.className = 'msg-label';
+    label.textContent = role === 'user' ? '▶ OPERATORE' : '◆ J.E.R.V.I.S.';
 
-        function sendManual() {
-            const text = userInput.value.trim();
-            if (text) { sendMsg(text); userInput.value = ''; }
-        }
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-bubble';
 
-        // ── VOCE ──
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let recognition = null;
-        let voiceAlwaysOn = false;
+    if (imgSrc) {
+        const img = document.createElement('img');
+        img.src = imgSrc;
+        img.style.cssText = 'max-width:100%;max-height:220px;border-radius:2px;margin-bottom:8px;display:block;border:1px solid rgba(0,229,255,0.2)';
+        bubble.appendChild(img);
+    }
+    if (text) {
+        const p = document.createElement('span');
+        p.textContent = text;
+        bubble.appendChild(p);
+    }
 
-        if (SpeechRecognition) {
-            recognition = new SpeechRecognition();
-            recognition.lang = 'it-IT';
-            recognition.continuous = true;
-            recognition.interimResults = false;
+    wrapper.appendChild(label);
+    wrapper.appendChild(bubble);
+    chatBox.appendChild(wrapper);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
 
-            recognition.onresult = (event) => {
-                const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
-                const wakeWords = ['jervis', 'giervis', 'jarvis', 'giarvis'];
-                const found = wakeWords.find(w => transcript.includes(w));
-                if (found) {
-                    const command = transcript.split(found).pop().trim();
-                    if (command.length > 1) sendMsg(command);
-                }
-            };
-            recognition.onerror = (e) => { if (e.error !== 'no-speech') console.error(e.error); };
-            recognition.onend = () => { if (voiceAlwaysOn) recognition.start(); };
+function showTyping() {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'msg jervis typing';
+    wrapper.id = 'typing-indicator';
+    const label = document.createElement('div');
+    label.className = 'msg-label';
+    label.textContent = '◆ J.E.R.V.I.S.';
+    const bubble = document.createElement('div');
+    bubble.className = 'msg-bubble';
+    bubble.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
+    wrapper.appendChild(label);
+    wrapper.appendChild(bubble);
+    chatBox.appendChild(wrapper);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
 
-            document.getElementById('voiceBtn').addEventListener('click', () => {
-                voiceAlwaysOn = !voiceAlwaysOn;
-                const btn = document.getElementById('voiceBtn');
-                const status = document.getElementById('voiceStatus');
-                if (voiceAlwaysOn) {
-                    recognition.start();
-                    btn.classList.add('active');
-                    status.textContent = '● ASCOLTO ATTIVO — dite "Jervis..."';
-                    status.classList.add('listening');
-                } else {
-                    recognition.stop();
-                    btn.classList.remove('active');
-                    status.textContent = '● VOICE STANDBY';
-                    status.classList.remove('listening');
-                }
-            });
-        } else {
-            document.getElementById('voiceBtn').style.opacity = '0.2';
-        }
+function removeTyping() {
+    const t = document.getElementById('typing-indicator');
+    if (t) t.remove();
+}
 
-        // ── MEMORIA ──
-        // ── CHECK ROLE AT STARTUP ──
-        (async function() {
-            try {
-                const res = await fetch('/me');
-                const data = await res.json();
-                if (data.role === 'admin') {
-                    document.getElementById('adminBtn').style.display = 'inline-block';
-                    document.getElementById('activityBtn').style.display = 'inline-block';
-                }
-                const statusSub = document.querySelector('.status-sub');
-                if (statusSub) statusSub.textContent = `OPERATORE: ${data.username.toUpperCase()}`;
-            } catch(e) {}
-        })();
+// ── GESTIONE FILE E IMMAGINI ──
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
 
-        async function doLogout() {
-            await fetch('/logout', { method: 'POST' });
-            window.location.href = '/';
-        }
+    if (file.type.startsWith('image/')) {
+        reader.onload = (ev) => {
+            pendingImage = { b64: ev.target.result.split(',')[1], type: file.type, dataUrl: ev.target.result, fileType: 'image', name: file.name };
+            document.getElementById('img-preview').src = ev.target.result;
+            document.getElementById('img-preview-wrap').style.display = 'flex';
+        };
+        reader.readAsDataURL(file);
+    } else {
+        reader.onload = (ev) => {
+            pendingImage = { b64: btoa(unescape(encodeURIComponent(ev.target.result))), type: 'text/plain', dataUrl: null, fileType: 'text', name: file.name };
+            document.getElementById('img-preview-wrap').style.display = 'flex';
+            document.getElementById('img-preview-wrap').innerHTML = `<div style="color:var(--arc);font-size:11px;padding:8px">📝 ${file.name} <button onclick="removeImage()" style="background:none;border:none;color:var(--red);cursor:pointer;margin-left:8px">✕</button></div>`;
+        };
+        reader.readAsText(file);
+    }
+});
 
-        function closeAll() {
-            document.getElementById('memoryPanel').classList.remove('open');
-            document.getElementById('adminPanel').classList.remove('open');
-            document.getElementById('activityPanel').classList.remove('open');
-            document.getElementById('overlay').classList.remove('open');
-        }
+function removeImage() {
+    pendingImage = null;
+    document.getElementById('img-preview-wrap').style.display = 'none';
+    document.getElementById('fileInput').value = '';
+}
 
-        async function openActivity() {
-            document.getElementById('activityPanel').classList.add('open');
-            document.getElementById('overlay').classList.add('open');
-            const content = document.getElementById('activity-content');
-            content.innerHTML = '<div class="memory-item" style="opacity:0.4">Caricamento dati...</div>';
-            try {
-                const res = await fetch('/admin/activity');
-                const data = await res.json();
-                if (!Object.keys(data).length) {
-                    content.innerHTML = '<div class="memory-item" style="opacity:0.4">Nessuna attività registrata.</div>';
-                    return;
-                }
-                // Ordina: online prima, poi per ultimo accesso
-                const sorted = Object.entries(data).sort((a, b) => {
-                    if (a[1].online !== b[1].online) return b[1].online - a[1].online;
-                    return b[1].total_messages - a[1].total_messages;
-                });
-                content.innerHTML = sorted.map(([username, info]) => {
-                    const onlineDot = info.online
-                        ? `<span style="width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);display:inline-block;flex-shrink:0"></span>`
-                        : `<span style="width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,0.15);display:inline-block;flex-shrink:0"></span>`;
+// ── FUNZIONI ESTETICHE (PARTICELLE) ──
+function initParticles() {
+    const container = document.getElementById('particles');
+    if (!container) return;
+    for (let i = 0; i < 18; i++) {
+        const p = document.createElement('div');
+        p.className = 'particle';
+        p.style.left = Math.random() * 100 + 'vw';
+        p.style.animationDuration = (8 + Math.random() * 15) + 's';
+        p.style.animationDelay = (Math.random() * 10) + 's';
+        p.style.opacity = Math.random() * 0.5;
+        container.appendChild(p);
+    }
+}
 
-                    const sessionsHtml = info.sessions.length ? `
-                        <table class="sessions-table">
-                            <tr>
-                                <th>LOGIN</th>
-                                <th>LOGOUT</th>
-                                <th>DURATA</th>
-                                <th>MSG</th>
-                            </tr>
-                            ${info.sessions.map(s => `
-                                <tr>
-                                    <td>${s.login}</td>
-                                    <td>${s.logout}</td>
-                                    <td style="color:var(--arc)">${s.duration}</td>
-                                    <td style="color:var(--gold)">${s.messages}</td>
-                                </tr>
-                            `).join('')}
-                        </table>` : '<div style="font-size:10px;opacity:0.4;padding:4px 0">Nessuna sessione registrata.</div>';
+// ── GESTIONE MODALI (MEMORIA, ADMIN, ECC) ──
+function openMemory() { document.getElementById('memoryPanel').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
+function openAdmin() { document.getElementById('adminPanel').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
+function closeAll() { 
+    document.querySelectorAll('.memory-panel').forEach(p => p.classList.remove('open')); 
+    document.getElementById('overlay').classList.remove('open'); 
+}
+function doLogout() { window.location.href = '/logout'; }
 
-                    const uid = 'act_' + username;
-                    return `
-                    <div class="activity-user-card">
-                        <div class="activity-user-header" onclick="document.getElementById('${uid}').style.display = document.getElementById('${uid}').style.display === 'none' ? 'block' : 'none'">
-                            ${onlineDot}
-                            <span class="activity-username">${username.toUpperCase()}</span>
-                            <span style="font-size:9px;color:${info.online ? 'var(--green)' : 'var(--text-dim)'}">
-                                ${info.online ? '● ONLINE' : info.last_seen}
-                            </span>
-                        </div>
-                        <div class="activity-stats">
-                            <div class="activity-stat">SESSIONI TOTALI<span>${info.total_sessions}</span></div>
-                            <div class="activity-stat">MESSAGGI TOTALI<span>${info.total_messages}</span></div>
-                            <div class="activity-stat">ULTIMO ACCESSO<span style="font-size:10px">${info.last_seen}</span></div>
-                        </div>
-                        <button class="toggle-sessions" onclick="const el=document.getElementById('${uid}');el.style.display=el.style.display==='none'?'block':'none'">
-                            ▼ STORICO SESSIONI (ultime ${info.sessions.length})
-                        </button>
-                        <div id="${uid}" style="display:none;margin-top:8px">
-                            ${sessionsHtml}
-                        </div>
-                    </div>`;
-                }).join('');
-            } catch(e) {
-                content.innerHTML = '<div class="memory-item" style="color:var(--red)">Errore caricamento dati.</div>';
-            }
-        }
-
-        async function openMemory() {
-            try {
-                const res = await fetch('/memory');
-                const data = await res.json();
-                document.getElementById('mem-name').textContent = data.user_name || '—';
-                document.getElementById('mem-count').textContent = `${data.total_conversations} conversazioni archiviate`;
-                const factsEl = document.getElementById('mem-facts');
-                if (data.facts && data.facts.length > 0) {
-                    factsEl.innerHTML = data.facts.map(f => `<div class="memory-item">${f}</div>`).join('');
-                } else {
-                    factsEl.innerHTML = '<div class="memory-item" style="opacity:0.4">Nessun dato ancora.</div>';
-                }
-            } catch(e) {}
-            document.getElementById('memoryPanel').classList.add('open');
-            document.getElementById('overlay').classList.add('open');
-        }
-
-        async function clearMemory() {
-            if (!confirm('Cancellare tutta la memoria di Jervis?')) return;
-            await fetch('/memory/clear', { method: 'POST' });
-            closeAll();
-            addMessage('jervis', 'Memoria cancellata. Sono pronto a ricominciare da capo, Signore.');
-        }
-
-        // ── ADMIN ──
-        async function openAdmin() {
-            await loadUsers();
-            await loadPresence();
-            document.getElementById('adminPanel').classList.add('open');
-            document.getElementById('overlay').classList.add('open');
-        }
-
-        async function loadPresence() {
-            try {
-                const res = await fetch('/admin/presence');
-                const data = await res.json();
-                const el = document.getElementById('presence-list');
-                if (Object.keys(data).length === 0) {
-                    el.innerHTML = '<div class="memory-item" style="opacity:0.4">Nessun accesso registrato.</div>';
-                    return;
-                }
-                el.innerHTML = Object.entries(data).map(([u, v]) => `
-                    <div class="memory-item" style="display:flex;align-items:center;gap:10px">
-                        <span style="width:8px;height:8px;border-radius:50%;background:${v.online ? 'var(--green)' : 'rgba(255,255,255,0.2)'};box-shadow:${v.online ? '0 0 6px var(--green)' : 'none'};flex-shrink:0"></span>
-                        <span style="flex:1">${u}</span>
-                        <span style="font-size:10px;opacity:0.5">${v.online ? 'ONLINE' : v.last_seen}</span>
-                    </div>
-                `).join('');
-            } catch(e) {}
-        }
-
-        async function loadUsers() {
-            const res = await fetch('/admin/users');
-            const users = await res.json();
-            const el = document.getElementById('users-list');
-            el.innerHTML = Object.entries(users).map(([u, v]) => `
-                <div class="memory-item" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-                    <span style="flex:1">${u} <span style="opacity:0.5;font-size:10px">[${v.role}]</span></span>
-                    <input type="password" id="pw_${u}" placeholder="Nuova password" style="flex:1;background:rgba(0,20,40,0.6);border:1px solid rgba(0,229,255,0.15);color:#fff;font-family:inherit;font-size:10px;padding:4px 8px;outline:none">
-                    <button class="mem-btn" style="padding:4px 10px;font-size:9px" onclick="changeUserPw('${u}')">✓</button>
-                    <button class="mem-btn danger" style="padding:4px 10px;font-size:9px" onclick="deleteUser('${u}')">✕</button>
-                </div>
-            `).join('');
-        }
-
-        async function changeUserPw(username) {
-            const pw = document.getElementById(`pw_${username}`).value.trim();
-            if (!pw) return showAdminMsg('Inserisci una password', true);
-            const res = await fetch(`/admin/users/${username}/password`, {
-                method: 'PUT',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({password: pw})
-            });
-            const data = await res.json();
-            showAdminMsg(data.ok ? `Password di ${username} aggiornata` : data.error, !data.ok);
-        }
-
-        async function deleteUser(username) {
-            if (!confirm(`Eliminare l'utente "${username}"?`)) return;
-            const res = await fetch(`/admin/users/${username}`, { method: 'DELETE' });
-            const data = await res.json();
-            if (data.ok) { await loadUsers(); showAdminMsg(`Utente ${username} eliminato`); }
-            else showAdminMsg(data.error, true);
-        }
-
-        async function addUser() {
-            const username = document.getElementById('newUsername').value.trim();
-            const password = document.getElementById('newPassword').value.trim();
-            const role = document.getElementById('newRole').value;
-            if (!username || !password) return showAdminMsg('Username e password obbligatori', true);
-            const res = await fetch('/admin/users', {
-                method: 'POST',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({username, password, role})
-            });
-            const data = await res.json();
-            if (data.ok) {
-                document.getElementById('newUsername').value = '';
-                document.getElementById('newPassword').value = '';
-                await loadUsers();
-                showAdminMsg(`Utente ${username} creato`);
-            } else showAdminMsg(data.error, true);
-        }
-
-        async function changeMyPw() {
-            const pw = document.getElementById('myNewPw').value.trim();
-            if (!pw) return showAdminMsg('Inserisci la nuova password', true);
-            const res = await fetch('/admin/my-password', {
-                method: 'PUT',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({password: pw})
-            });
-            const data = await res.json();
-            document.getElementById('myNewPw').value = '';
-            showAdminMsg(data.ok ? 'Password aggiornata!' : data.error, !data.ok);
-        }
-
-        function showAdminMsg(msg, isError) {
-            const el = document.getElementById('admin-msg');
-            el.style.color = isError ? 'var(--red)' : 'var(--green)';
-            el.textContent = (isError ? '⚠ ' : '✓ ') + msg;
-            setTimeout(() => el.textContent = '', 3000);
-        }
-
-        function togglePw(id) {
-            const el = document.getElementById(id);
-            el.type = el.type === 'password' ? 'text' : 'password';
-        }
-
-        // ── ARC REACTOR click easter egg ──
-        document.getElementById('arcReactor').addEventListener('click', () => {
-            sendMsg('Jervis, stato dei sistemi.');
-        });
+// Shortcut INVIO
+userInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendManual(); });
     </script>
 </body>
 </html>
