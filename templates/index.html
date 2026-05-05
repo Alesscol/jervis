@@ -605,21 +605,21 @@
     </div>
 
     <script>
-        // ── CONFIGURAZIONE E STATO DEL SISTEMA ──
+       // ── CONFIGURAZIONE E STATO DEL SISTEMA ──
 let conversationHistory = [];
 let isWaiting = false;
 let pendingImage = null;
-let imageModeActive = false; // Gestisce il tasto 🎨
-let currentAudio = null;     // Gestisce il tasto 🎙/⏹
+let imageModeActive = false; 
+let currentAudio = null;     
 
 const chatBox = document.getElementById('chat-box');
 const userInput = document.getElementById('userInput');
 
 // ── INIZIALIZZAZIONE ALL'AVVIO ──
 window.onload = async function() {
-    console.log("J.E.R.V.I.S. - Inizializzazione protocolli di sicurezza...");
-    await checkAccess(); // Controlla se mostrare i tasti Admin
-    initParticles();     // Avvia le particelle estetiche
+    console.log("J.E.R.V.I.S. - Inizializzazione protocolli...");
+    await checkAccess(); 
+    initParticles();     
 };
 
 // ── CONTROLLO ACCESSO ADMIN ──
@@ -630,7 +630,6 @@ async function checkAccess() {
         if (data.role === 'admin') {
             document.getElementById('adminBtn').style.display = 'inline-block';
             document.getElementById('activityBtn').style.display = 'inline-block';
-            console.log("Privilegi di Amministratore confermati.");
         }
     } catch (err) {
         console.error("Errore verifica permessi.");
@@ -706,8 +705,6 @@ async function sendMsg(text) {
 
         if (data.response) {
             addMessage('jervis', data.response, data.image_url);
-            
-            // Gestione della sintesi vocale
             if (data.audio_url) {
                 if (currentAudio) currentAudio.pause();
                 currentAudio = new Audio(data.audio_url);
@@ -718,13 +715,13 @@ async function sendMsg(text) {
         }
     } catch (err) {
         removeTyping();
-        addMessage('jervis', "Protocollo interrotto. Verificare connessione al server, Signore.");
+        addMessage('jervis', "Protocollo interrotto. Verificare connessione al server.");
     } finally {
         isWaiting = false;
     }
 }
 
-// ── FUNZIONI UI (CHAT E MESSAGGI) ──
+// ── FUNZIONI UI ──
 function addMessage(role, text, imgSrc) {
     const welcome = chatBox.querySelector('.welcome');
     if (welcome) welcome.remove();
@@ -760,13 +757,9 @@ function showTyping() {
     const wrapper = document.createElement('div');
     wrapper.className = 'msg jervis typing';
     wrapper.id = 'typing-indicator';
-    const label = document.createElement('div');
-    label.className = 'msg-label';
-    label.textContent = '◆ J.E.R.V.I.S.';
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
     bubble.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-    wrapper.appendChild(label);
     wrapper.appendChild(bubble);
     chatBox.appendChild(wrapper);
     chatBox.scrollTop = chatBox.scrollHeight;
@@ -806,7 +799,17 @@ function removeImage() {
     document.getElementById('fileInput').value = '';
 }
 
-// ── FUNZIONI ESTETICHE (PARTICELLE) ──
+// ── MODALI E PANNELLI ──
+function openMemory() { document.getElementById('memoryPanel').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
+function openAdmin() { document.getElementById('adminPanel').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
+function openActivity() { document.getElementById('activityPanel').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
+function closeAll() { 
+    document.querySelectorAll('.memory-panel').forEach(p => p.classList.remove('open')); 
+    document.getElementById('overlay').classList.remove('open'); 
+}
+function doLogout() { window.location.href = '/logout'; }
+
+// ── ESTETICA ──
 function initParticles() {
     const container = document.getElementById('particles');
     if (!container) return;
@@ -816,21 +819,10 @@ function initParticles() {
         p.style.left = Math.random() * 100 + 'vw';
         p.style.animationDuration = (8 + Math.random() * 15) + 's';
         p.style.animationDelay = (Math.random() * 10) + 's';
-        p.style.opacity = Math.random() * 0.5;
         container.appendChild(p);
     }
 }
 
-// ── GESTIONE MODALI (MEMORIA, ADMIN, ECC) ──
-function openMemory() { document.getElementById('memoryPanel').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
-function openAdmin() { document.getElementById('adminPanel').classList.add('open'); document.getElementById('overlay').classList.add('open'); }
-function closeAll() { 
-    document.querySelectorAll('.memory-panel').forEach(p => p.classList.remove('open')); 
-    document.getElementById('overlay').classList.remove('open'); 
-}
-function doLogout() { window.location.href = '/logout'; }
-
-// Shortcut INVIO
 userInput.addEventListener('keypress', e => { if (e.key === 'Enter') sendManual(); });
     </script>
 </body>
