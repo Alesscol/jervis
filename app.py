@@ -556,7 +556,19 @@ def chat():
     image_type = data.get('image_type', 'image/jpeg')
     file_type  = data.get('file_type', 'image')
     file_name  = data.get('file_name', 'file')
+    image_mode = data.get('image_mode', False)
     username   = session.get("username", "Signore")
+
+    update_presence(username)
+    record_message(username)
+
+    memory = load_memory()
+
+    # ── MODALITÀ IMMAGINI FORZATA ─────────────────────────────────
+    if image_mode and user_input and not image_b64:
+        img_url = genera_immagine(user_input)
+        extract_facts(user_input, "Immagine generata.", memory)
+        return jsonify({'response': f"Ecco l'immagine, Signore.", 'image_url': img_url})
 
     update_presence(username)
     record_message(username)
