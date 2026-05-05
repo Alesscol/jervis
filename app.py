@@ -17,7 +17,7 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "jervis-super-secret-2026")
 
 # ══════════════════════════════════════════════════════════════════
-#  CONFIGURAZIONE
+#  CONFIGURAZIONE API
 # ══════════════════════════════════════════════════════════════════
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -47,24 +47,47 @@ def get_sheet(tab_name):
         return sh.add_worksheet(title=tab_name, rows=1000, cols=20)
 
 # ══════════════════════════════════════════════════════════════════
-#  STRUMENTO RICERCA WEB
+#  GESTIONE UTENTI & ATTIVITÀ (ORIGINALE)
 # ══════════════════════════════════════════════════════════════════
-def web_search(query):
-    """Esegue una ricerca rapida online se Jervis ne ha bisogno."""
+def hash_pw(pw): return hashlib.sha256(pw.encode()).hexdigest()
+
+VIP_USERS = {
+    "admin":    {"password": hash_pw("alessandro10"),  "role": "admin"},
+    "luca":     {"password": hash_pw("PumbaLaRue010"), "role": "user"},
+    "giacomo":  {"password": hash_pw("Naxx7!"),        "role": "user"},
+    "cristian": {"password": hash_pw("Kvaratskhelia"), "role": "user"},
+}
+
+def load_users():
     try:
-        # Utilizziamo DuckDuckGo via API libera per rapidità
-        url = f"https://api.duckduckgo.com/?q={requests.utils.quote(query)}&format=json&no_html=1"
-        res = requests.get(url).json()
-        abstract = res.get("AbstractText", "")
-        if abstract:
-            return f"\n[Informazioni dal Web]: {abstract}\n"
-        return ""
-    except:
-        return ""
+        ws = get_sheet("user")
+        rows = ws.get_all_values()
+        users = {row[0]: {"password": row[1], "role": row[2]} for row in rows if len(row) >= 3 and row[0] != "username"}
+        return {**users, **VIP_USERS}
+    except: return VIP_USERS
+
+def update_presence(username):
+    try:
+        ws = get_sheet("presence")
+        now = datetime.datetime.now().isoformat()
+        cells = ws.findall(username)
+        if cells: ws.update_cell(cells[0].row, 2, now)
+        else: ws.append_row([username, now])
+    except: pass
+
+def record_message(username):
+    try:
+        ws = get_sheet("activity")
+        rows = ws.get_all_values()
+        for i in range(len(rows) - 1, 0, -1):
+            if rows[i][0] == username and (len(rows[i]) < 3 or rows[i][2] == ""):
+                curr = int(rows[i][4]) if len(rows[i]) > 4 and rows[i][4].isdigit() else 0
+                ws.update_cell(i+1, 5, str(curr + 1))
+                return
+    except: pass
 
 # ══════════════════════════════════════════════════════════════════
-#  NUOVA GESTIONE MEMORIA PER UTENTE (Tab "memory")
-#  Struttura: Col A (username) | Col B (JSON Facts) | Col C (JSON History)
+#  MEMORIA UTENTE & RICERCA WEB
 # ══════════════════════════════════════════════════════════════════
 def load_user_memory(username):
     try:
@@ -72,119 +95,110 @@ def load_user_memory(username):
         rows = ws.get_all_values()
         for row in rows:
             if row[0] == username:
-                return {
-                    "facts": json.loads(row[1]) if len(row) > 1 else [],
-                    "conversations": json.loads(row[2]) if len(row) > 2 else []
-                }
-        return {"facts": [], "conversations": []}
-    except:
-        return {"facts": [], "conversations": []}
+                return {"facts": json.loads(row[1]), "name": row[3] if len(row) > 3 else username}
+        return {"facts": [], "name": username}
+    except: return {"facts": [], "name": username}
 
 def save_user_memory(username, memory):
     try:
         ws = get_sheet("memory")
         rows = ws.get_all_values()
-        facts_json = json.dumps(memory.get("facts", []), ensure_ascii=False)
-        convs_json = json.dumps(memory.get("conversations", []), ensure_ascii=False)
-        
+        data = [username, json.dumps(memory["facts"], ensure_ascii=False), "", memory.get("name", username)]
         for i, row in enumerate(rows):
             if row[0] == username:
-                ws.update(f"B{i+1}:C{i+1}", [[facts_json, convs_json]])
+                ws.update(f"A{i+1}:D{i+1}", [data])
                 return
-        ws.append_row([username, facts_json, convs_json])
-    except Exception as e:
-        print(f"Errore salvataggio memoria: {e}")
-
-# ══════════════════════════════════════════════════════════════════
-#  LOGICA ESTRAZIONE FATTI (Migliorata con IA)
-# ══════════════════════════════════════════════════════════════════
-def extract_facts_ai(user_msg, memory, username):
-    # Analisi rapida per vedere se l'utente ha rivelato preferenze o info
-    prompt = f"Estrai info personali brevi da: '{user_msg}'. Rispondi solo con il fatto o 'null'."
-    try:
-        res = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=50
-        )
-        fact = res.choices[0].message.content.strip()
-        if "null" not in fact.lower() and len(fact) > 3:
-            if fact not in memory["facts"]:
-                memory["facts"].append(fact)
-    except: pass
-    
-    # Mantieni cronologia
-    memory["conversations"].append({"t": datetime.datetime.now().isoformat()[:16], "m": user_msg[:100]})
-    if len(memory["conversations"]) > 10: memory["conversations"].pop(0)
-
-# ══════════════════════════════════════════════════════════════════
-#  TTS & UTILS (Mantenuti dal tuo codice)
-# ══════════════════════════════════════════════════════════════════
-def hash_pw(pw): return hashlib.sha256(pw.encode()).hexdigest()
-
-async def generate_voice(text, filepath):
-    try:
-        communicate = edge_tts.Communicate(text, "it-IT-GiuseppeNeural")
-        await communicate.save(filepath)
+        ws.append_row(data)
     except: pass
 
-def run_async(coro):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try: return loop.run_until_complete(coro)
-    finally: loop.close()
+def web_search(query):
+    try:
+        url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1"
+        res = requests.get(url).json()
+        return f"\n[Web Info]: {res.get('AbstractText', '')}" if res.get('AbstractText') else ""
+    except: return ""
 
 # ══════════════════════════════════════════════════════════════════
-#  ROUTE CHAT (IL CUORE AGGIORNATO)
+#  IA & IMMAGINI
 # ══════════════════════════════════════════════════════════════════
+def genera_immagine(prompt):
+    p_enc = requests.utils.quote(prompt)
+    return f"https://image.pollinations.ai/prompt/{p_enc}?width=768&height=512&nologo=true&seed={random.randint(1,9999)}"
+
 @app.route('/chat', methods=['POST'])
 def chat():
-    if not session.get("username"): return jsonify({"error": "Auth required"}), 401
+    if not session.get("username"): return jsonify({"error": "Auth"}), 401
     
     data = request.get_json()
     user_input = data.get('msg', '').strip()
-    username = session["username"]
     image_mode = data.get('image_mode', False)
+    username = session["username"]
 
-    # 1. Carica Memoria specifica di questo utente
+    update_presence(username)
+    record_message(username)
+    
     memory = load_user_memory(username)
     
-    # 2. Controllo Intent Web (Serve cercare online?)
-    web_info = ""
-    intent_check = f"L'utente vuole info recenti o dati che un'IA del 2024 non sa? Rispondi SI o NO. Messaggio: {user_input}"
+    # 1. Capire l'intenzione (Chat o Immagine o Ricerca)
+    intent_prompt = f"Analizza: '{user_input}'. Rispondi JSON: {{\"intent\": \"image/search/chat\", \"query\": \"...\"}}"
     try:
-        check = groq_client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"user", "content":intent_check}])
-        if "SI" in check.choices[0].message.content.upper():
-            web_info = web_search(user_input)
-    except: pass
+        res = groq_client.chat.completions.create(model="llama-3.1-8b-instant", messages=[{"role":"user", "content":intent_prompt}])
+        p = json.loads(re.sub(r'```[a-z]*', '', res.choices[0].message.content).strip('` '))
+        intent = p.get("intent", "chat")
+    except: intent = "chat"
 
-    # 3. Costruzione Prompt con Memoria e Web
-    facts_str = ", ".join(memory["facts"]) if memory["facts"] else "Nessuna info salvata."
-    system_prompt = f"""Sei J.E.R.V.I.S., assistente di {username}.
-    Info note su {username}: {facts_str}.
-    Dati web aggiornati: {web_info}
-    Sii elegante, formale ma ironico. Risposte brevi (max 2 frasi)."""
+    # 2. Logica Filtro Immagini Forzato
+    if intent == "image":
+        if image_mode:
+            url = genera_immagine(user_input)
+            return jsonify({'response': "Certamente, Signore. Elaboro l'immagine.", 'image_url': url})
+        else:
+            ans = "Signore, la modalità immagini è disattivata. La attivi per procedere."
+            return jsonify({'response': ans})
 
-    # 4. Generazione Risposta
+    # 3. Ricerca Web se necessario
+    web_context = web_search(user_input) if intent == "search" else ""
+
+    # 4. Risposta Finale Jervis
+    sys_prompt = f"Sei J.E.R.V.I.S., IA di {username}. Ricordi: {memory['facts']}. Web: {web_context}. Sii breve e formale."
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_input}]
+            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_input}]
         )
         answer = response.choices[0].message.content.strip()
-    except:
-        answer = "Sistemi in sovraccarico, Signore."
+    except: answer = "Sistemi offline, Signore. Verifichi la chiave API."
 
-    # 5. Salvataggio Memoria e Audio
-    extract_facts_ai(user_input, memory, username)
-    save_user_memory(username, memory)
+    # 5. Audio e Salvataggio
+    audio_fn = f"v_{random.randint(1000,9999)}.mp3"
+    async def speak():
+        await edge_tts.Communicate(answer, "it-IT-GiuseppeNeural").save(f"static/{audio_fn}")
+    asyncio.run(speak())
 
-    static_dir = os.path.join(app.root_path, 'static')
-    os.makedirs(static_dir, exist_ok=True)
-    audio_file = f"voice_{random.randint(1000,9999)}.mp3"
-    run_async(generate_voice(answer, os.path.join(static_dir, audio_file)))
+    return jsonify({'response': answer, 'audio_url': f'/static/{audio_fn}'})
 
-    return jsonify({'response': answer, 'audio_url': f'/static/{audio_file}'})
+# ══════════════════════════════════════════════════════════════════
+#  ROTTE BASE (LOGIN / LOGOUT / INDEX)
+# ══════════════════════════════════════════════════════════════════
+@app.route('/')
+def index():
+    return render_template('index.html') if session.get("username") else render_template('login.html')
 
-# [IL RESTO DELLE TUE ROTTE LOGIN/ADMIN RIMANE INVARIATO...]
-# Copia qui le tue funzioni: init_vip_users, login, logout, get_activity, ecc.
+@app.route('/login', methods=['POST'])
+def login():
+    d = request.get_json()
+    u, p = d.get("username"), d.get("password")
+    users = load_users()
+    if u in users and users[u]["password"] == hash_pw(p):
+        session["username"], session["role"] = u, users[u]["role"]
+        return jsonify({"ok": True})
+    return jsonify({"ok": False}), 401
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+if __name__ == '__main__':
+    if not os.path.exists("static"): os.makedirs("static")
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
