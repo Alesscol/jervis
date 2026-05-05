@@ -524,6 +524,7 @@
             <div class="input-row">
                 <span class="input-prefix">CMD ></span>
                 <input type="text" id="userInput" placeholder="Inserisca un comando..." autocomplete="off">
+                <button class="btn-voice" id="imgModeBtn" title="Modalità immagini OFF" onclick="toggleImageMode()" style="font-size:13px">🎨</button>
                 <button class="btn-voice" id="uploadBtn" title="Carica file" onclick="document.getElementById('fileInput').click()">📎</button>
                 <input type="file" id="fileInput" accept="image/*,.pdf,.txt,.md,.py,.js,.html,.csv" style="display:none">
                 <button class="btn-voice" id="voiceBtn" title="Microfono">🎙</button>
@@ -735,7 +736,7 @@
             const imgPreview = pendingImage ? pendingImage.dataUrl : null;
             addMessage('user', text || `📎 ${pendingImage?.name || 'File allegato'}`, imgPreview);
 
-            const payload = { msg: text, history: conversationHistory };
+            const payload = { msg: text, history: conversationHistory, image_mode: imageModeActive };
             if (pendingImage) {
                 payload.image_b64 = pendingImage.b64;
                 payload.image_type = pendingImage.type;
@@ -782,6 +783,27 @@
                 addMessage('jervis', 'Errore di connessione. Verificare i sistemi.');
             } finally {
                 isWaiting = false;
+            }
+        }
+
+        // ── MODALITÀ IMMAGINI ──
+        let imageModeActive = false;
+        function toggleImageMode() {
+            imageModeActive = !imageModeActive;
+            const btn = document.getElementById('imgModeBtn');
+            const input = document.getElementById('userInput');
+            if (imageModeActive) {
+                btn.style.borderColor = 'rgba(255,215,0,0.7)';
+                btn.style.color = 'rgba(255,215,0,0.9)';
+                btn.style.boxShadow = '0 0 10px rgba(255,215,0,0.3)';
+                btn.title = 'Modalità immagini ON';
+                input.placeholder = '🎨 Descrivi l\'immagine da generare...';
+            } else {
+                btn.style.borderColor = '';
+                btn.style.color = '';
+                btn.style.boxShadow = '';
+                btn.title = 'Modalità immagini OFF';
+                input.placeholder = 'Inserisca un comando...';
             }
         }
 
