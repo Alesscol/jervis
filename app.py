@@ -693,9 +693,13 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
         return jsonify({'response': f"Metto «{query}» su Spotify, Signore.", 'open_url': search_url})
 
     if intent == "generate_image":
-        img_url = genera_immagine(query or user_input)
-        extract_facts(user_input, "Immagine generata.", memory)
-        return jsonify({'response': "Ecco l'immagine, Signore.", 'image_url': img_url})
+        if not image_mode:
+            # Modalità immagini disattiva — tratta come chat normale
+            intent = "chat"
+        else:
+            img_url = genera_immagine(query or user_input)
+            extract_facts(user_input, "Immagine generata.", memory)
+            return jsonify({'response': "Ecco l'immagine, Signore.", 'image_url': img_url})
 
     messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
     messages.append({"role": "user", "content": user_input})
