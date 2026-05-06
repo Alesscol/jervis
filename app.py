@@ -717,7 +717,7 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
-            max_tokens=300,
+            max_tokens=1500,
             tools=[{
                 "type": "function",
                 "function": {
@@ -757,7 +757,7 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
             response2 = groq_client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=messages,
-                max_tokens=300
+                max_tokens=1500
             )
             answer = response2.choices[0].message.content.strip()
         else:
