@@ -278,25 +278,32 @@ def load_activity():
 #  MEMORIA — Google Sheets (tab "memory")
 #  Riga 1: facts (JSON) | Riga 2: conversations (JSON) | Riga 3: user_name
 # ══════════════════════════════════════════════════════════════════
-def load_memory():
+def load_memory(username="default"):
     try:
         ws = get_sheet("memory")
         rows = ws.get_all_values()
-        facts = json.loads(rows[0][0]) if rows and rows[0] else []
-        convs = json.loads(rows[1][0]) if len(rows) > 1 and rows[1] else []
-        name  = rows[2][0] if len(rows) > 2 and rows[2] else "Signore"
-        return {"facts": facts, "conversations": convs, "user_name": name}
+        for row in rows:
+            if row and row[0] == username:
+                facts = json.loads(row[1]) if len(row) > 1 and row[1] else []
+                convs = json.loads(row[2]) if len(row) > 2 and row[2] else []
+                name  = row[3] if len(row) > 3 and row[3] else "Signore"
+                return {"facts": facts, "conversations": convs, "user_name": name}
     except Exception as e:
         print(f"[Sheets] load_memory error: {e}")
-        return {"facts": [], "conversations": [], "user_name": "Signore"}
+    return {"facts": [], "conversations": [], "user_name": "Signore"}
 
-def save_memory(memory):
+def save_memory(memory, username="default"):
     try:
         ws = get_sheet("memory")
-        ws.clear()
-        ws.update("A1", [[json.dumps(memory.get("facts", []), ensure_ascii=False)]])
-        ws.update("A2", [[json.dumps(memory.get("conversations", []), ensure_ascii=False)]])
-        ws.update("A3", [[memory.get("user_name", "Signore")]])
+        rows = ws.get_all_values()
+        facts_json = json.dumps(memory.get("facts", []), ensure_ascii=False)
+        convs_json = json.dumps(memory.get("conversations", []), ensure_ascii=False)
+        name = memory.get("user_name", "Signore")
+        for i, row in enumerate(rows):
+            if row and row[0] == username:
+                ws.update(f"A{i+1}:D{i+1}", [[username, facts_json, convs_json, name]])
+                return
+        ws.append_row([username, facts_json, convs_json, name])
     except Exception as e:
         print(f"[Sheets] save_memory error: {e}")
 
@@ -346,7 +353,7 @@ def analizza_immagine(image_b64, media_type, domanda):
 # ══════════════════════════════════════════════════════════════════
 #  LOGICA MEMORIA / PROMPT
 # ══════════════════════════════════════════════════════════════════
-def extract_facts(user_msg, jarvis_reply, memory):
+def extract_facts(user_msg, jarvis_reply, memory, username="default"):
     for kw in ["mi chiamo", "il mio nome è", "chiamami"]:
         if kw in user_msg.lower():
             idx = user_msg.lower().find(kw) + len(kw)
@@ -362,7 +369,7 @@ def extract_facts(user_msg, jarvis_reply, memory):
     })
     if len(memory["conversations"]) > 100:
         memory["conversations"] = memory["conversations"][-100:]
-    save_memory(memory)
+    save_memory(memory, username)
 
 def build_system_prompt(memory, username):
     name = memory.get("user_name", username or "Signore")
@@ -562,12 +569,10 @@ def chat():
     update_presence(username)
     record_message(username)
 
-    memory = load_memory()
-
-    # ── MODALITÀ IMMAGINI FORZATA ─────────────────────────────────
+    memory = load_memory(username)
     if image_mode and user_input and not image_b64:
         img_url = genera_immagine(user_input)
-        extract_facts(user_input, "Immagine generata.", memory)
+        extract_facts(user_input, "Immagine generata.", memory, username)
         return jsonify({'response': f"Ecco l'immagine, Signore.", 'image_url': img_url})
 
     update_presence(username)
@@ -589,7 +594,7 @@ def chat():
                 answer = response.choices[0].message.content.strip()
             except Exception as e:
                 answer = f"Non riesco a leggere il file: {e}"
-            extract_facts(user_input or f"[file: {file_name}]", answer, memory)
+            extract_facts(user_input or f"[file: {file_name}]", answer, memory, username)
             return jsonify({'response': answer})
 
         elif file_type == 'pdf':
@@ -606,13 +611,13 @@ def chat():
                 answer = response.choices[0].message.content.strip()
             except Exception as e:
                 answer = f"Non riesco a leggere il PDF: {e}"
-            extract_facts(user_input or f"[pdf: {file_name}]", answer, memory)
+            extract_facts(user_input or f"[pdf: {file_name}]", answer, memory, username)
             return jsonify({'response': answer})
 
         else:
             # Immagine
             answer = analizza_immagine(image_b64, image_type, domanda)
-            extract_facts("[immagine]", answer, memory)
+            extract_facts("[immagine]", answer, memory, username)
             return jsonify({'response': answer})
 
     intent_prompt = f"""Analizza questo comando utente e rispondi SOLO con un JSON valido, niente altro.
@@ -674,22 +679,22 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
         intent = "chat"
 
     if intent == "open_site" and url:
-        extract_facts(user_input, "Apertura sito.", memory)
+        extract_facts(user_input, "Apertura sito.", memory, username)
         return jsonify({'response': "Certamente, Signore. Apro subito.", 'open_url': url})
 
     if intent in ("youtube_video", "youtube_search") and query:
         search_url = f"https://www.youtube.com/results?search_query={requests.utils.quote(query)}"
-        extract_facts(user_input, f"Ricerca YouTube: {query}", memory)
+        extract_facts(user_input, f"Ricerca YouTube: {query}", memory, username)
         return jsonify({'response': f"Cerco «{query}» su YouTube, Signore.", 'open_url': search_url})
 
     if intent == "google_search" and query:
         search_url = f"https://www.google.com/search?q={requests.utils.quote(query)}"
-        extract_facts(user_input, f"Ricerca Google: {query}", memory)
+        extract_facts(user_input, f"Ricerca Google: {query}", memory, username)
         return jsonify({'response': f"Cerco «{query}» su Google, Signore.", 'open_url': search_url})
 
     if intent == "spotify_search" and query:
         search_url = f"https://open.spotify.com/search/{requests.utils.quote(query)}"
-        extract_facts(user_input, f"Spotify: {query}", memory)
+        extract_facts(user_input, f"Spotify: {query}", memory, username)
         return jsonify({'response': f"Metto «{query}» su Spotify, Signore.", 'open_url': search_url})
 
     if intent == "generate_image":
@@ -698,7 +703,7 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
             intent = "chat"
         else:
             img_url = genera_immagine(query or user_input)
-            extract_facts(user_input, "Immagine generata.", memory)
+            extract_facts(user_input, "Immagine generata.", memory, username)
             return jsonify({'response': "Ecco l'immagine, Signore.", 'image_url': img_url})
 
     messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
@@ -707,13 +712,56 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
         response = groq_client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=messages,
-            max_tokens=300
+            max_tokens=300,
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Cerca informazioni aggiornate su internet",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "La query di ricerca"}
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }],
+            tool_choice="auto"
         )
-        answer = response.choices[0].message.content.strip()
-    except:
+
+        # Se Groq vuole fare una ricerca
+        msg = response.choices[0].message
+        if msg.tool_calls:
+            import urllib.parse
+            query = json.loads(msg.tool_calls[0].function.arguments).get("query", user_input)
+            # Usa DuckDuckGo API (gratuita, no key)
+            search_url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(query)}&format=json&no_html=1&skip_disambig=1"
+            try:
+                r = requests.get(search_url, timeout=5)
+                data_ddg = r.json()
+                abstract = data_ddg.get("AbstractText", "")
+                related = " | ".join([t.get("Text","") for t in data_ddg.get("RelatedTopics", [])[:3] if isinstance(t, dict) and t.get("Text")])
+                search_result = abstract or related or "Nessun risultato trovato."
+            except:
+                search_result = "Ricerca non disponibile al momento."
+
+            # Manda il risultato a Groq per il riassunto
+            messages.append({"role": "assistant", "content": None, "tool_calls": msg.tool_calls})
+            messages.append({"role": "tool", "tool_call_id": msg.tool_calls[0].id, "content": search_result})
+            response2 = groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                max_tokens=300
+            )
+            answer = response2.choices[0].message.content.strip()
+        else:
+            answer = msg.content.strip()
+    except Exception as e:
+        print(f"[Chat] errore: {e}")
         answer = "Sistemi offline, Signore."
 
-    extract_facts(user_input, answer, memory)
+    extract_facts(user_input, answer, memory, username)
 
     static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
     os.makedirs(static_dir, exist_ok=True)
@@ -728,7 +776,8 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
 @app.route('/memory', methods=['GET'])
 @require_login
 def get_memory():
-    memory = load_memory()
+    username = session.get("username", "default")
+    memory = load_memory(username)
     return jsonify({
         'user_name': memory.get('user_name', 'Signore'),
         'facts': memory.get('facts', []),
@@ -738,7 +787,8 @@ def get_memory():
 @app.route('/memory/clear', methods=['POST'])
 @require_login
 def clear_memory():
-    save_memory({"facts": [], "conversations": [], "user_name": "Signore"})
+    username = session.get("username", "default")
+    save_memory({"facts": [], "conversations": [], "user_name": "Signore"}, username)
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
