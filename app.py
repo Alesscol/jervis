@@ -564,6 +564,7 @@ def chat():
     file_type  = data.get('file_type', 'image')
     file_name  = data.get('file_name', 'file')
     image_mode = data.get('image_mode', False)
+    session_history = data.get('history', [])
     username   = session.get("username", "Signore")
 
     update_presence(username)
@@ -707,6 +708,10 @@ chatgpt=https://chat.openai.com, claude=https://claude.ai
             return jsonify({'response': "Ecco l'immagine, Signore.", 'image_url': img_url})
 
     messages = [{"role": "system", "content": build_system_prompt(memory, username)}]
+    # Aggiunge la storia della conversazione corrente
+    for turn in session_history[-10:]:
+        messages.append({"role": "user", "content": turn.get("user", "")})
+        messages.append({"role": "assistant", "content": turn.get("jervis", "")})
     messages.append({"role": "user", "content": user_input})
     try:
         response = groq_client.chat.completions.create(
